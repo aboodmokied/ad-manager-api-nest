@@ -1,0 +1,101 @@
+// Prisma schema for the Unified Ad Campaign Manager (UACM)
+// This schema defines all models for the backend application
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Enum representing supported advertising platforms
+enum Platform {
+  META   // Meta Ads (Facebook/Instagram)
+  GOOGLE // Google Ads
+}
+
+// Enum representing the status of a campaign
+enum CampaignStatus {
+  PENDING // Campaign is waiting to be processed
+  ACTIVE  // Campaign is active and running
+  PAUSED  // Campaign is temporarily paused
+  ERROR   // Campaign encountered an error
+}
+
+// Model for storing connected OAuth accounts for ad platforms
+model ConnectedAccount {
+  id           String    @id @default(cuid())
+  userId       String    // ID of the user who owns this account
+  platform     Platform  // The ad platform this account is for
+  accessToken  String    // OAuth access token for the platform
+  refreshToken String?   // OAuth refresh token (optional, depending on platform)
+  expiresAt    DateTime? // When the access token expires (optional)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  // Unique constraint: a user can't have multiple accounts for the same platform
+  @@unique([userId, platform])
+}
+
+// Canonical UACM Campaign model - the single source of truth for a campaign
+model UacmCampaign {
+  id               String           @id @default(cuid())
+  userId           String           // ID of the user who owns this campaign
+  name             String           // Human-readable name for the campaign
+  status           CampaignStatus   @default(PENDING) // Overall campaign status
+  budget           Decimal          @db.Decimal(10, 2) // Total budget for the campaign
+  startDate        DateTime         // When the campaign should start
+  endDate          DateTime         // When the campaign should end
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  // Relations
+  platformCampaigns PlatformCampaign[] // Campaign-specific configs for each platform
+  metricLogs       MetricLog[]         // Performance metrics for this campaign
+}
+
+// Platform-specific campaign configuration
+model PlatformCampaign {
+  id               String           @id @default(cuid())
+  uacmCampaignId   String           // ID of the parent UACM campaign
+  platform         Platform         // The ad platform this is for
+  platformCampaignId String?        // The campaign ID from the ad platform (e.g., Meta/Google ID)
+  platformData     Json             @db.JsonB // Unstructured platform-specific config (JSONB for fast querying)
+  status           CampaignStatus   @default(PENDING) // Status of this platform-specific campaign
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  // Relations
+  uacmCampaign UacmCampaign @relation(fields: [uacmCampaignId], references: [id], onDelete: Cascade)
+  metricLogs   MetricLog[]
+
+  // Unique constraint: one platform campaign per UACM campaign and platform
+  @@unique([uacmCampaignId, platform])
+}
+
+// Model for storing campaign performance metrics
+model MetricLog {
+  id                String           @id @default(cuid())
+  uacmCampaignId    String           // ID of the parent UACM campaign
+  platformCampaignId String          // ID of the platform campaign
+  platform          Platform         // The ad platform this is for
+  date              DateTime         // Date/time these metrics are for
+  unifiedMetrics    Json             @db.JsonB // Metrics in UACM's unified format
+  rawMetrics        Json             @db.JsonB // Raw metrics from the ad platform
+  createdAt         DateTime         @default(now())
+
+  // Relations
+  uacmCampaign     UacmCampaign     @relation(fields: [uacmCampaignId], references: [id], onDelete: Cascade)
+  platformCampaign PlatformCampaign @relation(fields: [platformCampaignId], references: [id], onDelete: Cascade)
+}
+
+// Model for idempotency records (prevents duplicate processing of events)
+model IdempotencyRecord {
+  id         String   @id // Unique idempotency key (e.g., "campaign:123")
+  processedAt DateTime @default(now()) // When the key was processed
+
+  // Index for faster lookups
+  @@index([id])
+}
