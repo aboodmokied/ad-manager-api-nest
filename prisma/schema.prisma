@@ -2,12 +2,14 @@
 // This schema defines all models for the backend application
 
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [pgvector(map: "vector")]
 }
 
 // Enum representing supported advertising platforms
@@ -22,6 +24,30 @@ enum CampaignStatus {
   ACTIVE  // Campaign is active and running
   PAUSED  // Campaign is temporarily paused
   ERROR   // Campaign encountered an error
+}
+
+// Enum for LLM providers
+enum LLMProvider {
+  OPENAI    // OpenAI GPT models
+  ANTHROPIC // Anthropic Claude models
+  GOOGLE    // Google Gemini models
+  OLLAMA    // Local models through Ollama
+}
+
+// Enum for recommendation types
+enum RecommendationType {
+  BUDGET_OPTIMIZATION  // Recommendation about budget changes
+  AUDIENCE_IMPROVEMENT // Recommendation about audience targeting
+  CREATIVE_TWEAK       // Recommendation about ad creatives
+  SCHEDULING_ADJUSTMENT // Recommendation about campaign scheduling
+  GENERAL_PERFORMANCE  // General performance improvement
+}
+
+// Enum for AI analysis types
+enum AnalysisType {
+  CAMPAIGN_PERFORMANCE  // Analysis of overall campaign performance
+  ANOMALY_DETECTION     // Detection of abnormal behavior
+  PERFORMANCE_PREDICTION // Prediction of future performance
 }
 
 // Model for storing connected OAuth accounts for ad platforms
@@ -54,6 +80,8 @@ model UacmCampaign {
   // Relations
   platformCampaigns PlatformCampaign[] // Campaign-specific configs for each platform
   metricLogs       MetricLog[]         // Performance metrics for this campaign
+  recommendations  AIRecommendation[]  // AI-generated recommendations for this campaign
+  analyses         AIAnalysis[]        // AI-generated analyses for this campaign
 }
 
 // Platform-specific campaign configuration
@@ -98,4 +126,93 @@ model IdempotencyRecord {
 
   // Index for faster lookups
   @@index([id])
+}
+
+// ========================================
+// AI-RELATED MODELS
+// ========================================
+
+// Model for storing AI conversations
+model AIConversation {
+  id        String       @id @default(cuid())
+  userId    String       // ID of the user who owns this conversation
+  title     String       // Human-readable title for the conversation
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  // Relations
+  messages AIMessage[]
+  usage    AIUsage[]
+}
+
+// Model for storing individual AI conversation messages
+model AIMessage {
+  id             String    @id @default(cuid())
+  conversationId String    // ID of the parent conversation
+  role           String    // "user" | "assistant" | "system"
+  content        String    // The message content
+  metadata       Json?     @db.JsonB // Additional metadata (token counts, timings, etc.)
+  createdAt      DateTime  @default(now())
+
+  // Relations
+  conversation AIConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+}
+
+// Model for storing AI-generated campaign recommendations
+model AIRecommendation {
+  id          String             @id @default(cuid())
+  campaignId  String             // ID of the campaign this recommendation is for
+  type        RecommendationType // Type of recommendation
+  description String             // Detailed recommendation text
+  priority    String             // Priority level: "low" | "medium" | "high" | "critical"
+  confidence  Decimal            @db.Decimal(3, 2) // Confidence score (0.00 - 1.00)
+  reason      String             // Reasoning behind the recommendation
+  expectedImpact String          // Expected impact of implementing this recommendation
+  createdAt   DateTime           @default(now())
+
+  // Relations
+  campaign UacmCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+}
+
+// Model for storing AI campaign analyses
+model AIAnalysis {
+  id          String       @id @default(cuid())
+  campaignId  String       // ID of the campaign this analysis is for
+  type        AnalysisType // Type of analysis performed
+  insights    Json         @db.JsonB // Structured insights from the analysis
+  summary     String       // Human-readable summary
+  createdAt   DateTime     @default(now())
+
+  // Relations
+  campaign UacmCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+}
+
+// Model for tracking AI usage (token counts, costs, etc.)
+model AIUsage {
+  id             String       @id @default(cuid())
+  conversationId String?      // ID of the conversation this usage is associated with
+  userId         String       // ID of the user who made the request
+  provider       LLMProvider  // LLM provider used
+  model          String       // Specific model used (e.g., "gpt-4o", "claude-3-opus")
+  promptTokens   Int          // Number of tokens in the prompt
+  completionTokens Int        // Number of tokens in the completion
+  totalTokens    Int          // Total tokens used
+  cost           Decimal      @db.Decimal(10, 4) // Estimated cost of this request
+  requestType    String       // Type of request: "chat" | "analysis" | "report" | "recommendation"
+  createdAt      DateTime     @default(now())
+
+  // Relations
+  conversation AIConversation? @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+}
+
+// Model for storing vector embeddings for RAG
+model VectorDocument {
+  id          String  @id @default(cuid())
+  content     String  // Original text content
+  metadata    Json?   @db.JsonB // Additional metadata about the document
+  embedding   Unsupported("vector(1536)") // Vector embedding (1536-dimensional for OpenAI embeddings)
+  createdAt   DateTime @default(now())
+
+  // Index for fast similarity search
+  @@index([embedding])
 }
