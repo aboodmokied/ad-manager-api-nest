@@ -1,6 +1,9 @@
 import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import amqp, { AmqpConnectionManager, ChannelWrapper } from 'amqp-connection-manager';
+import amqp, {
+  AmqpConnectionManager,
+  ChannelWrapper,
+} from 'amqp-connection-manager';
 import { Channel, ConsumeMessage } from 'amqplib';
 
 /**
@@ -39,11 +42,16 @@ class MockRabbitMQ {
    * @param message The message to send (will be JSON-stringified)
    */
   async publish(routingKey: string, message: any) {
-    console.log(`[Mock RabbitMQ] Publishing message to routing key: ${routingKey}`, message);
+    console.log(
+      `[Mock RabbitMQ] Publishing message to routing key: ${routingKey}`,
+      message,
+    );
     // In mock mode, we bypass the actual broker and immediately call all registered handlers
-    for (const [queueName, handler] of this.queues) {
+    for (const [, handler] of this.queues) {
       // Wrap our message in a MockConsumeMessage to mimic real AMQP message structure
-      await handler(new MockConsumeMessage(Buffer.from(JSON.stringify(message))));
+      await handler(
+        new MockConsumeMessage(Buffer.from(JSON.stringify(message))),
+      );
     }
   }
 
@@ -53,8 +61,14 @@ class MockRabbitMQ {
    * @param routingKey The routing key/topic to bind the queue to
    * @param handler The async function to execute when a message arrives
    */
-  async startConsume(queueName: string, routingKey: string, handler: (msg: any) => Promise<void>) {
-    console.log(`[Mock RabbitMQ] Consuming from queue: ${queueName}, routing key: ${routingKey}`);
+  async startConsume(
+    queueName: string,
+    routingKey: string,
+    handler: (msg: any) => Promise<void>,
+  ) {
+    console.log(
+      `[Mock RabbitMQ] Consuming from queue: ${queueName}, routing key: ${routingKey}`,
+    );
     // Store the handler in memory so publish() can call it later
     this.queues.set(queueName, handler);
   }
@@ -114,12 +128,16 @@ export class RabbitMQService implements OnModuleInit, OnModuleDestroy {
     // Get RABBITMQ_URL from environment variables (if provided)
     const rabbitUrl = this.configService.get<string>('RABBITMQ_URL');
     // Use mock mode if NODE_ENV is 'development' OR no RABBITMQ_URL is provided
-    const useMock = this.configService.get<string>('NODE_ENV') === 'development' || !rabbitUrl;
+    const useMock =
+      this.configService.get<string>('NODE_ENV') === 'development' ||
+      !rabbitUrl;
 
     if (useMock) {
       this.useMock = true;
       this.mock = new MockRabbitMQ();
-      console.log('Using mock RabbitMQ client (development mode or no RABBITMQ_URL provided)');
+      console.log(
+        'Using mock RabbitMQ client (development mode or no RABBITMQ_URL provided)',
+      );
     } else {
       // Step 1: Establish a connection to RabbitMQ using the provided URL
       this.connection = amqp.connect([rabbitUrl]);
@@ -133,7 +151,9 @@ export class RabbitMQService implements OnModuleInit, OnModuleDestroy {
           // Step 3: Declare the exchange (idempotent - safe to call even if exchange exists)
           // 'topic' type: messages are routed to queues based on a pattern matching routing keys
           // { durable: true }: Exchange survives broker restart
-          await channel.assertExchange(this.exchangeName, 'topic', { durable: true });
+          await channel.assertExchange(this.exchangeName, 'topic', {
+            durable: true,
+          });
         },
       });
     }
@@ -166,7 +186,10 @@ export class RabbitMQService implements OnModuleInit, OnModuleDestroy {
       // 1. Convert message to JSON string and then to Buffer
       // 2. Set persistent: true to ensure message survives broker restart
       await this.channel.publish(
-        this.exchangeName, routingKey, Buffer.from(JSON.stringify(message)), { persistent: true }
+        this.exchangeName,
+        routingKey,
+        Buffer.from(JSON.stringify(message)),
+        { persistent: true },
       );
     }
   }
@@ -177,7 +200,11 @@ export class RabbitMQService implements OnModuleInit, OnModuleDestroy {
    * @param routingKey The routing key/topic pattern to bind the queue to
    * @param handler The async function to execute for each incoming message
    */
-  async consume(queueName: string, routingKey: string, handler: (msg: ConsumeMessage) => Promise<void>) {
+  async consume(
+    queueName: string,
+    routingKey: string,
+    handler: (msg: ConsumeMessage) => Promise<void>,
+  ) {
     if (this.useMock && this.mock) {
       // If using mock, delegate to mock.startConsume()
       await this.mock.startConsume(queueName, routingKey, handler);

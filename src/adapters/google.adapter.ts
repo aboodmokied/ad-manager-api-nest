@@ -1,6 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { Platform } from '@prisma/client';
-import { AdsPlatformAdapter, UnifiedMetrics, CreateCampaignRequest, UpdateBudgetRequest } from './ads-platform.adapter';
+import {
+  AdsPlatformAdapter,
+  UnifiedMetrics,
+  CreateCampaignRequest,
+  UpdateBudgetRequest,
+} from './ads-platform.adapter';
 
 /**
  * Adapter for Google Ads
@@ -17,7 +22,7 @@ export class GoogleAdapter implements AdsPlatformAdapter {
    * @param accessToken - Google OAuth access token
    * @returns Google Ads campaign ID
    */
-  async createCampaign(request: CreateCampaignRequest, accessToken: string): Promise<string> {
+  async createCampaign(request: CreateCampaignRequest): Promise<string> {
     // TODO: Implement actual Google Ads API integration
     console.log('GoogleAdapter: Creating campaign', request);
     return `google_campaign_${Date.now()}`;
@@ -28,7 +33,7 @@ export class GoogleAdapter implements AdsPlatformAdapter {
    * @param request - Budget update request
    * @param accessToken - Google OAuth access token
    */
-  async updateBudget(request: UpdateBudgetRequest, accessToken: string): Promise<void> {
+  async updateBudget(request: UpdateBudgetRequest): Promise<void> {
     // TODO: Implement actual Google Ads API integration
     console.log('GoogleAdapter: Updating budget', request);
   }
@@ -39,7 +44,7 @@ export class GoogleAdapter implements AdsPlatformAdapter {
    * @param accessToken - Google OAuth access token
    * @returns Unified performance metrics
    */
-  async getInsights(platformCampaignId: string, accessToken: string): Promise<UnifiedMetrics> {
+  async getInsights(): Promise<UnifiedMetrics> {
     // TODO: Implement actual Google Ads API integration
     const rawMetrics = {
       impressions: 2000,
@@ -65,7 +70,9 @@ export class GoogleAdapter implements AdsPlatformAdapter {
       conversions: rawMetrics.conversions || 0,
       ctr: rawMetrics.ctr || 0,
       cpc: rawMetrics.cpc_micros ? rawMetrics.cpc_micros / 1000000 : 0, // Convert micros to dollars
-      roas: rawMetrics.conversions_value ? (rawMetrics.conversions_value / (rawMetrics.cost_micros / 1000000)) : undefined,
+      roas: rawMetrics.conversions_value
+        ? rawMetrics.conversions_value / (rawMetrics.cost_micros / 1000000)
+        : undefined,
     };
   }
 }

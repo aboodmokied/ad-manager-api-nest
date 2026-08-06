@@ -6,6 +6,8 @@ import { PrismaModule } from './prisma/prisma.module';
 import { RedisModule } from './redis/redis.module';
 import { RabbitMQModule } from './rabbitmq/rabbitmq.module';
 import { CampaignsModule } from './campaigns/campaigns.module';
+import { AuthModule } from './auth/auth.module';
+import { MailModule } from './mail/mail.module';
 
 @Module({
   imports: [
@@ -14,6 +16,8 @@ import { CampaignsModule } from './campaigns/campaigns.module';
     RedisModule,
     RabbitMQModule,
     CampaignsModule,
+    AuthModule,
+    MailModule,
   ],
   controllers: [AppController],
   providers: [AppService],

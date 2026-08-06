@@ -1,4 +1,12 @@
-import { Controller, Post, Body, Get, Param, HttpCode, HttpStatus } from '@nestjs/common';
+import {
+  Controller,
+  Post,
+  Body,
+  Get,
+  Param,
+  HttpCode,
+  HttpStatus,
+} from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiParam } from '@nestjs/swagger';
 import { CampaignsService } from './campaigns.service';
 import { CreateCampaignDto } from './dto/create-campaign.dto';

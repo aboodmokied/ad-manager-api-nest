@@ -4,7 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AdapterFactory } from '../adapters/adapter-factory.service';
 import { RateLimiterService } from '../common/rate-limiter.service';
 import { IdempotencyService } from '../common/idempotency.service';
-import { CampaignStatus, Platform } from '@prisma/client';
+import { CampaignStatus } from '@prisma/client';
 
 @Injectable()
 export class CampaignsWorker implements OnModuleInit {
@@ -20,17 +20,20 @@ export class CampaignsWorker implements OnModuleInit {
     await this.rabbitMQService.consume(
       'campaign_created_queue',
       'campaign.created',
-      this.handleCampaignCreated.bind(this)
+      this.handleCampaignCreated.bind(this),
     );
   }
 
   private async handleCampaignCreated(msg: any) {
-    const { uacmCampaignId, platformCampaignId, platform } = JSON.parse(msg.content.toString());
+    const { uacmCampaignId, platformCampaignId, platform } = JSON.parse(
+      msg.content.toString(),
+    );
 
     const idempotencyKey = `campaign:${platformCampaignId}`;
 
     // Check idempotency first
-    const alreadyProcessed = await this.idempotencyService.checkAndMarkProcessed(idempotencyKey);
+    const alreadyProcessed =
+      await this.idempotencyService.checkAndMarkProcessed(idempotencyKey);
     if (alreadyProcessed) {
       console.log(`Campaign ${platformCampaignId} already processed`);
       return;
@@ -60,10 +63,13 @@ export class CampaignsWorker implements OnModuleInit {
 
     // Check rate limit
     const rateLimitKey = `platform:${platform}:${connectedAccount.id}`;
-    const rateLimitAllowed = await this.rateLimiter.checkRateLimit(rateLimitKey, {
-      tokensPerInterval: 100, // Example: 100 requests per minute
-      interval: 60000,
-    });
+    const rateLimitAllowed = await this.rateLimiter.checkRateLimit(
+      rateLimitKey,
+      {
+        tokensPerInterval: 100, // Example: 100 requests per minute
+        interval: 60000,
+      },
+    );
 
     if (!rateLimitAllowed) {
       // Requeue the message to be processed later
@@ -82,7 +88,7 @@ export class CampaignsWorker implements OnModuleInit {
           endDate: platformCampaign.uacmCampaign.endDate,
           platformSpecificData: platformCampaign.platformData,
         },
-        connectedAccount.accessToken
+        connectedAccount.accessToken,
       );
 
       // Update status to active

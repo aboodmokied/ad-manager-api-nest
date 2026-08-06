@@ -10,6 +10,43 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// Model representing a registered user of the platform
+model User {
+  id               String   @id @default(cuid())
+  name             String   // User's display name
+  email            String   @unique // Login email (unique - one account per email)
+  passwordHash     String   // Password stored as a bcrypt hash (never plaintext)
+  twoFactorEnabled Boolean  @default(false) // Whether 2FA (TOTP) is enabled for this account
+  twoFactorSecret  String?  // TOTP secret used to verify 2FA codes (nullable until enabled)
+  emailVerified    Boolean  @default(false) // Whether the email address was verified via the emailed link
+  oauthProvider    String?  // OAuth provider used to create/link this account (e.g. "google")
+  oauthProviderId  String?  // Unique user ID from the OAuth provider
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  // Relations
+  refreshTokens RefreshToken[] // Active/past refresh tokens for this user
+
+  // Unique constraint: one Google account can only be linked to one UACM user
+  @@unique([oauthProvider, oauthProviderId])
+}
+
+// Model for storing server-side refresh tokens (hash only, never the raw token)
+model RefreshToken {
+  id        String    @id @default(cuid())
+  userId    String    // ID of the user this refresh token belongs to
+  tokenHash String    @unique // SHA-256 hash of the refresh token (raw token is never stored)
+  expiresAt DateTime  // When the refresh token expires
+  revokedAt DateTime? // When the token was revoked/rotated (null = still valid)
+  createdAt DateTime  @default(now())
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Index for faster lookups by user
+  @@index([userId])
+}
+
 // Enum representing supported advertising platforms
 enum Platform {
   META   // Meta Ads (Facebook/Instagram)

@@ -1,6 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { Platform } from '@prisma/client';
-import { AdsPlatformAdapter, UnifiedMetrics, CreateCampaignRequest, UpdateBudgetRequest } from './ads-platform.adapter';
+import {
+  AdsPlatformAdapter,
+  UnifiedMetrics,
+  CreateCampaignRequest,
+  UpdateBudgetRequest,
+} from './ads-platform.adapter';
 
 /**
  * Adapter for Meta Ads (Facebook/Instagram)
@@ -17,7 +22,7 @@ export class MetaAdapter implements AdsPlatformAdapter {
    * @param accessToken - Meta OAuth access token
    * @returns Meta campaign ID
    */
-  async createCampaign(request: CreateCampaignRequest, accessToken: string): Promise<string> {
+  async createCampaign(request: CreateCampaignRequest): Promise<string> {
     // TODO: Implement actual Meta Ads API integration
     console.log('MetaAdapter: Creating campaign', request);
     return `meta_campaign_${Date.now()}`;
@@ -28,7 +33,7 @@ export class MetaAdapter implements AdsPlatformAdapter {
    * @param request - Budget update request
    * @param accessToken - Meta OAuth access token
    */
-  async updateBudget(request: UpdateBudgetRequest, accessToken: string): Promise<void> {
+  async updateBudget(request: UpdateBudgetRequest): Promise<void> {
     // TODO: Implement actual Meta Ads API integration
     console.log('MetaAdapter: Updating budget', request);
   }
@@ -39,7 +44,7 @@ export class MetaAdapter implements AdsPlatformAdapter {
    * @param accessToken - Meta OAuth access token
    * @returns Unified performance metrics
    */
-  async getInsights(platformCampaignId: string, accessToken: string): Promise<UnifiedMetrics> {
+  async getInsights(): Promise<UnifiedMetrics> {
     // TODO: Implement actual Meta Ads API integration
     const rawMetrics = {
       impressions: 1000,
@@ -65,7 +70,9 @@ export class MetaAdapter implements AdsPlatformAdapter {
       conversions: rawMetrics.purchase || 0,
       ctr: rawMetrics.ctr || 0,
       cpc: rawMetrics.cpc || 0,
-      roas: rawMetrics.purchase_value ? rawMetrics.purchase_value / rawMetrics.spend : undefined,
+      roas: rawMetrics.purchase_value
+        ? rawMetrics.purchase_value / rawMetrics.spend
+        : undefined,
     };
   }
 }

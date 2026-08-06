@@ -1,4 +1,10 @@
-import { IsString, IsNumber, IsDateString, IsEnum, IsObject } from 'class-validator';
+import {
+  IsString,
+  IsNumber,
+  IsDateString,
+  IsEnum,
+  IsObject,
+} from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { Platform } from '@prisma/client';
 
@@ -42,7 +48,7 @@ export class CreateCampaignDto {
 
   @ApiProperty({
     description: 'Budget for the campaign in USD',
-    example: 1000.00,
+    example: 1000.0,
   })
   @IsNumber()
   budget: number;
