@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateCampaignDto } from './dto/create-campaign.dto';
-import { CampaignStatus, Platform } from '@prisma/client';
+import { CampaignStatus } from '@prisma/client';
 import { RabbitMQService } from '../rabbitmq/rabbitmq.service';
 
 @Injectable()
@@ -21,7 +21,7 @@ export class CampaignsService {
         endDate: new Date(createCampaignDto.endDate),
         status: CampaignStatus.PENDING,
         platformCampaigns: {
-          create: createCampaignDto.platforms.map(config => ({
+          create: createCampaignDto.platforms.map((config) => ({
             platform: config.platform,
             platformData: config.platformSpecificData,
             status: CampaignStatus.PENDING,

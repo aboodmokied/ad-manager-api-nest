@@ -8,13 +8,15 @@ interface RateLimitConfig {
 
 @Injectable()
 export class RateLimiterService {
-  private readonly redis: any;
-
-  constructor(private readonly redisService: RedisService) {
-    this.redis = this.redisService.getClient();
-  }
+  constructor(private readonly redisService: RedisService) {}
 
   async checkRateLimit(key: string, config: RateLimitConfig): Promise<boolean> {
+    const redis = this.redisService.getClient();
+    if (!redis) {
+      // Fail open when no store is available (e.g. mock/development mode)
+      return true;
+    }
+
     const now = Date.now();
     const windowStart = now - config.interval;
 
@@ -22,18 +24,18 @@ export class RateLimiterService {
     const keyName = `rate-limit:${key}`;
 
     // Remove old entries
-    await this.redis.zremrangebyscore(keyName, 0, windowStart);
+    await redis.zremrangebyscore(keyName, 0, windowStart);
 
     // Count current entries
-    const currentCount = await this.redis.zcard(keyName);
+    const currentCount = await redis.zcard(keyName);
 
     if (currentCount >= config.tokensPerInterval) {
       return false;
     }
 
     // Add new entry
-    await this.redis.zadd(keyName, now, `${now}-${Math.random()}`);
-    await this.redis.pexpire(keyName, config.interval);
+    await redis.zadd(keyName, now, `${now}-${Math.random()}`);
+    await redis.pexpire(keyName, config.interval);
 
     return true;
   }
