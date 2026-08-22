@@ -1,12 +1,21 @@
+import { Type } from 'class-transformer';
 import {
-  IsString,
-  IsNumber,
+  IsArray,
   IsDateString,
   IsEnum,
+  IsNumber,
   IsObject,
+  IsString,
+  Max,
+  Min,
+  ValidateNested,
 } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { Platform } from '@prisma/client';
+import { IsAfter } from '../../common/validators/is-after.decorator';
+
+/** Maximum budget allowed by the Prisma Decimal(10,2) column. */
+const MAX_BUDGET = 99_999_999.99;
 
 /**
  * Configuration for a specific ad platform
@@ -30,15 +39,9 @@ class PlatformConfig {
 
 /**
  * DTO for creating a new UACM campaign
+ * The authenticated user (from the JWT) owns the campaign; no userId field.
  */
 export class CreateCampaignDto {
-  @ApiProperty({
-    description: 'ID of the user creating the campaign',
-    example: 'user_123',
-  })
-  @IsString()
-  userId: string;
-
   @ApiProperty({
     description: 'Name of the campaign',
     example: 'Summer Sale Campaign',
@@ -51,6 +54,8 @@ export class CreateCampaignDto {
     example: 1000.0,
   })
   @IsNumber()
+  @Min(0.01)
+  @Max(MAX_BUDGET)
   budget: number;
 
   @ApiProperty({
@@ -65,12 +70,15 @@ export class CreateCampaignDto {
     example: '2024-06-30T23:59:59.999Z',
   })
   @IsDateString()
+  @IsAfter('startDate')
   endDate: string;
 
   @ApiProperty({
     description: 'List of platform configurations to create campaign on',
     type: [PlatformConfig],
   })
-  @IsObject({ each: true })
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => PlatformConfig)
   platforms: PlatformConfig[];
 }

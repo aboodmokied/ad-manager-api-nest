@@ -18,7 +18,18 @@ class MockRedis implements RedisClient {
     value: string,
     mode?: 'EX',
     ttlSeconds?: number,
-  ): Promise<string> {
+    getMode?: 'NX',
+  ): Promise<'OK' | null> {
+    if (getMode === 'NX') {
+      const existing = this.strings.get(key);
+      if (existing) {
+        if (existing.expiresAt && Date.now() > existing.expiresAt) {
+          this.strings.delete(key);
+        } else {
+          return null;
+        }
+      }
+    }
     const expiresAt =
       mode === 'EX' && ttlSeconds ? Date.now() + ttlSeconds * 1000 : 0;
     this.strings.set(key, { value, expiresAt });
@@ -41,11 +52,20 @@ class MockRedis implements RedisClient {
 
   async incr(key: string): Promise<number> {
     const entry = this.strings.get(key);
-    const current = entry ? Number(entry.value) : 0;
+    let current = 0;
+    let expiresAt = 0;
+    if (entry) {
+      if (entry.expiresAt && Date.now() > entry.expiresAt) {
+        this.strings.delete(key);
+      } else {
+        current = Number(entry.value) || 0;
+        expiresAt = entry.expiresAt;
+      }
+    }
     const next = current + 1;
     this.strings.set(key, {
       value: String(next),
-      expiresAt: entry?.expiresAt ?? 0,
+      expiresAt,
     });
     return next;
   }
@@ -108,8 +128,13 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   async onModuleInit() {
     const redisUrl = this.configService.get<string>('REDIS_URL');
     const nodeEnv = this.configService.get<string>('NODE_ENV');
+    // Connect to a real Redis whenever a URL is configured (including development,
+    // e.g. via docker compose). Fall back to the in-memory mock only in tests,
+    // when explicitly requested, or when no URL is provided.
     const useMock =
-      nodeEnv === 'development' || nodeEnv === 'test' || !redisUrl;
+      nodeEnv === 'test' ||
+      this.configService.get<string>('USE_MOCK_REDIS') === 'true' ||
+      !redisUrl;
 
     if (useMock) {
       this.client = new MockRedis();
@@ -117,7 +142,14 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
         'Using mock Redis client (development mode or no REDIS_URL provided)',
       );
     } else {
-      this.rawClient = new Redis(redisUrl);
+      this.rawClient = new Redis(redisUrl, {
+        retryStrategy: (times) => Math.min(times * 200, 2000),
+      });
+      this.rawClient.on('error', (err) => {
+        console.error(
+          `[RedisService] Connection error (${redisUrl}): ${err.message}`,
+        );
+      });
       this.client = this.rawClient;
     }
   }

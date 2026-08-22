@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotImplementedException } from '@nestjs/common';
 import { Platform } from '@prisma/client';
 import {
   AdsPlatformAdapter,
@@ -8,53 +8,43 @@ import {
 } from './ads-platform.adapter';
 
 /**
- * Adapter for Google Ads
- * Implements the AdsPlatformAdapter interface for Google Ads API
+ * Adapter for Google Ads.
+ *
+ * WARNING: the Google Ads campaign API integration is not implemented yet.
+ * Instead of returning fake campaign IDs (which would silently mark campaigns
+ * ACTIVE without creating anything), every operation throws so the campaign
+ * transitions to ERROR and is routed to the dead-letter queue for inspection.
  */
 @Injectable()
 export class GoogleAdapter implements AdsPlatformAdapter {
   /** The platform this adapter supports (GOOGLE) */
   platform = Platform.GOOGLE;
 
-  /**
-   * Creates a new campaign on Google Ads
-   * @param request - Campaign creation request
-   * @param accessToken - Google OAuth access token
-   * @returns Google Ads campaign ID
-   */
-  async createCampaign(request: CreateCampaignRequest): Promise<string> {
-    // TODO: Implement actual Google Ads API integration
-    console.log('GoogleAdapter: Creating campaign', request);
-    return `google_campaign_${Date.now()}`;
+  async createCampaign(
+    _request: CreateCampaignRequest,
+    _accessToken: string,
+  ): Promise<string> {
+    throw new NotImplementedException(
+      'Google Ads campaign creation is not implemented yet',
+    );
   }
 
-  /**
-   * Updates a campaign's budget on Google Ads
-   * @param request - Budget update request
-   * @param accessToken - Google OAuth access token
-   */
-  async updateBudget(request: UpdateBudgetRequest): Promise<void> {
-    // TODO: Implement actual Google Ads API integration
-    console.log('GoogleAdapter: Updating budget', request);
+  async updateBudget(
+    _request: UpdateBudgetRequest,
+    _accessToken: string,
+  ): Promise<void> {
+    throw new NotImplementedException(
+      'Google Ads budget updates are not implemented yet',
+    );
   }
 
-  /**
-   * Retrieves performance insights from Google Ads
-   * @param platformCampaignId - Google Ads campaign ID
-   * @param accessToken - Google OAuth access token
-   * @returns Unified performance metrics
-   */
-  async getInsights(): Promise<UnifiedMetrics> {
-    // TODO: Implement actual Google Ads API integration
-    const rawMetrics = {
-      impressions: 2000,
-      clicks: 80,
-      cost_micros: 15000000, // Google uses micro-units for currency (1 USD = 1,000,000 micros)
-      conversions: 3,
-      ctr: 4,
-      cpc_micros: 187500,
-    };
-    return this.transformToUnifiedMetrics(rawMetrics);
+  async getInsights(
+    _platformCampaignId: string,
+    _accessToken: string,
+  ): Promise<UnifiedMetrics> {
+    throw new NotImplementedException(
+      'Google Ads insights are not implemented yet',
+    );
   }
 
   /**

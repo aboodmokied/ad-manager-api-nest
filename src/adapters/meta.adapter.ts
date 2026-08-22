@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotImplementedException } from '@nestjs/common';
 import { Platform } from '@prisma/client';
 import {
   AdsPlatformAdapter,
@@ -8,53 +8,43 @@ import {
 } from './ads-platform.adapter';
 
 /**
- * Adapter for Meta Ads (Facebook/Instagram)
- * Implements the AdsPlatformAdapter interface for Meta's API
+ * Adapter for Meta Ads (Facebook/Instagram).
+ *
+ * WARNING: the Meta Ads campaign API integration is not implemented yet.
+ * Instead of returning fake campaign IDs (which would silently mark campaigns
+ * ACTIVE without creating anything), every operation throws so the campaign
+ * transitions to ERROR and is routed to the dead-letter queue for inspection.
  */
 @Injectable()
 export class MetaAdapter implements AdsPlatformAdapter {
   /** The platform this adapter supports (META) */
   platform = Platform.META;
 
-  /**
-   * Creates a new campaign on Meta Ads
-   * @param request - Campaign creation request
-   * @param accessToken - Meta OAuth access token
-   * @returns Meta campaign ID
-   */
-  async createCampaign(request: CreateCampaignRequest): Promise<string> {
-    // TODO: Implement actual Meta Ads API integration
-    console.log('MetaAdapter: Creating campaign', request);
-    return `meta_campaign_${Date.now()}`;
+  async createCampaign(
+    _request: CreateCampaignRequest,
+    _accessToken: string,
+  ): Promise<string> {
+    throw new NotImplementedException(
+      'Meta Ads campaign creation is not implemented yet',
+    );
   }
 
-  /**
-   * Updates a campaign's budget on Meta Ads
-   * @param request - Budget update request
-   * @param accessToken - Meta OAuth access token
-   */
-  async updateBudget(request: UpdateBudgetRequest): Promise<void> {
-    // TODO: Implement actual Meta Ads API integration
-    console.log('MetaAdapter: Updating budget', request);
+  async updateBudget(
+    _request: UpdateBudgetRequest,
+    _accessToken: string,
+  ): Promise<void> {
+    throw new NotImplementedException(
+      'Meta Ads budget updates are not implemented yet',
+    );
   }
 
-  /**
-   * Retrieves performance insights from Meta Ads
-   * @param platformCampaignId - Meta campaign ID
-   * @param accessToken - Meta OAuth access token
-   * @returns Unified performance metrics
-   */
-  async getInsights(): Promise<UnifiedMetrics> {
-    // TODO: Implement actual Meta Ads API integration
-    const rawMetrics = {
-      impressions: 1000,
-      clicks: 50,
-      spend: 10.5,
-      purchase: 2,
-      ctr: 5,
-      cpc: 0.21,
-    };
-    return this.transformToUnifiedMetrics(rawMetrics);
+  async getInsights(
+    _platformCampaignId: string,
+    _accessToken: string,
+  ): Promise<UnifiedMetrics> {
+    throw new NotImplementedException(
+      'Meta Ads insights are not implemented yet',
+    );
   }
 
   /**

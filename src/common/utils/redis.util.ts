@@ -12,7 +12,8 @@ export interface RedisClient {
     value: string,
     mode?: 'EX',
     ttlSeconds?: number,
-  ): Promise<string>;
+    getMode?: 'NX',
+  ): Promise<'OK' | null>;
   del(key: string): Promise<number>;
   incr(key: string): Promise<number>;
   expire(key: string, seconds: number): Promise<number>;
