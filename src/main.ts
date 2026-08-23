@@ -34,17 +34,23 @@ async function bootstrap() {
   const config = new DocumentBuilder()
     .setTitle('Unified Ad Campaign Manager API')
     .setDescription(
-      'API for managing ad campaigns across multiple platforms (Meta, Google)',
+      'API for managing ad campaigns across multiple platforms (Meta, Google, ' +
+        'LinkedIn, X, Snapchat, TikTok)',
     )
     .setVersion('1.0')
+    .addBearerAuth(
+      { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' },
+      'access-token',
+    )
     .addTag('campaigns')
     .addTag('auth')
+    .addTag('ad-accounts')
     .build();
 
   const document = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup('docs', app, document);
 
-  const port = 8030;
+  const port = Number(process.env.PORT ?? 8030);
   await app.listen(port);
   Logger.log(
     `Swagger docs available at: http://localhost:${port}/docs`,

@@ -8,6 +8,7 @@ import { RabbitMQModule } from './rabbitmq/rabbitmq.module';
 import { CampaignsModule } from './campaigns/campaigns.module';
 import { AuthModule } from './auth/auth.module';
 import { MailModule } from './mail/mail.module';
+import { AccountsModule } from './accounts/accounts.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { MailModule } from './mail/mail.module';
     CampaignsModule,
     AuthModule,
     MailModule,
+    AccountsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

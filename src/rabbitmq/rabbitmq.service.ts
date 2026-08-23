@@ -1,4 +1,9 @@
-import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  OnModuleInit,
+  OnModuleDestroy,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import amqp, {
   AmqpConnectionManager,
@@ -86,6 +91,8 @@ class MockRabbitMQ {
  */
 @Injectable()
 export class RabbitMQService implements OnModuleInit, OnModuleDestroy {
+  private readonly logger = new Logger(RabbitMQService.name);
+
   /**
    * The active AMQP connection manager instance (null if using mock)
    * AmqpConnectionManager provides automatic reconnection capabilities
@@ -115,6 +122,13 @@ export class RabbitMQService implements OnModuleInit, OnModuleDestroy {
   private readonly exchangeName = 'uacm_events';
 
   /**
+   * Resolves once the connection/channel (or mock) has been set up.
+   * Consumers and publishers await this so they never race the
+   * onModuleInit() lifecycle hook, regardless of provider init order.
+   */
+  private initPromise: Promise<void> | null = null;
+
+  /**
    * Creates a new instance of RabbitMQService
    * @param configService Nest's ConfigService to access environment variables
    */
@@ -125,11 +139,30 @@ export class RabbitMQService implements OnModuleInit, OnModuleDestroy {
    * Decides whether to use real RabbitMQ or mock, and sets up the connection/channel
    */
   async onModuleInit() {
+    this.initPromise = this.initialize();
+    await this.initPromise;
+  }
+
+  /**
+   * Ensures onModuleInit has completed before publish/consume are used.
+   * Makes callers safe even when their own onModuleInit hook runs earlier.
+   */
+  private async ensureInitialized(): Promise<void> {
+    if (!this.initPromise) {
+      this.initPromise = this.initialize();
+    }
+    await this.initPromise;
+  }
+
+  private async initialize() {
     // Get RABBITMQ_URL from environment variables (if provided)
     const rabbitUrl = this.configService.get<string>('RABBITMQ_URL');
-    // Use mock mode if NODE_ENV is 'development' OR no RABBITMQ_URL is provided
+    // Connect to a real broker whenever a URL is configured (including development,
+    // e.g. via docker compose). Fall back to the mock only in tests, when explicitly
+    // requested, or when no URL is provided.
     const useMock =
-      this.configService.get<string>('NODE_ENV') === 'development' ||
+      this.configService.get<string>('NODE_ENV') === 'test' ||
+      this.configService.get<string>('USE_MOCK_RABBITMQ') === 'true' ||
       !rabbitUrl;
 
     if (useMock) {
@@ -178,6 +211,7 @@ export class RabbitMQService implements OnModuleInit, OnModuleDestroy {
    * @param message The message payload (will be JSON-stringified)
    */
   async publish(routingKey: string, message: any) {
+    await this.ensureInitialized();
     if (this.useMock && this.mock) {
       // If using mock, delegate to mock.publish()
       await this.mock.publish(routingKey, message);
@@ -199,16 +233,24 @@ export class RabbitMQService implements OnModuleInit, OnModuleDestroy {
    * @param queueName The name of the queue to consume from
    * @param routingKey The routing key/topic pattern to bind the queue to
    * @param handler The async function to execute for each incoming message
+   * @param options.maxRetries Maximum delivery attempts before a message is
+   *   sent to the DLQ (or dropped when no DLQ is configured). Defaults to 3.
+   * @param options.dlq Queue name for failed messages. When provided, messages
+   *   that exhaust their retries are published there with the original routing
+   *   key and error attached as headers, then nacked without requeue.
    */
   async consume(
     queueName: string,
     routingKey: string,
     handler: (msg: ConsumeMessage) => Promise<void>,
+    options: { maxRetries?: number; dlq?: string } = {},
   ) {
+    await this.ensureInitialized();
     if (this.useMock && this.mock) {
       // If using mock, delegate to mock.startConsume()
       await this.mock.startConsume(queueName, routingKey, handler);
     } else if (this.channel) {
+      const maxRetries = options.maxRetries ?? 3;
       // For real RabbitMQ, use addSetup() to run queue/bind/consume setup
       // This ensures the setup runs every time a channel is recreated
       await this.channel.addSetup(async (channel: Channel) => {
@@ -220,7 +262,14 @@ export class RabbitMQService implements OnModuleInit, OnModuleDestroy {
         // This tells the exchange which messages to send to this queue
         await channel.bindQueue(queueName, this.exchangeName, routingKey);
 
-        // Step 3: Start consuming messages from the queue
+        // Step 3: Declare the dead-letter queue when configured and bind it
+        // to the exchange so published DLQ messages actually route somewhere.
+        if (options.dlq) {
+          await channel.assertQueue(options.dlq, { durable: true });
+          await channel.bindQueue(options.dlq, this.exchangeName, options.dlq);
+        }
+
+        // Step 4: Start consuming messages from the queue
         await channel.consume(queueName, async (msg) => {
           if (msg) {
             try {
@@ -229,14 +278,56 @@ export class RabbitMQService implements OnModuleInit, OnModuleDestroy {
               // If handler succeeds, acknowledge (ack) the message so RabbitMQ deletes it
               channel.ack(msg);
             } catch (error) {
-              // If handler throws an error, log it and nack the message
-              // nack with requeue=true: puts the message back in the queue to try again
-              console.error('Error processing message:', error);
-              channel.nack(msg, false, true);
+              const attempts = this.deliveryAttempts(msg);
+              if (attempts >= maxRetries) {
+                // Retry budget exhausted: route to DLQ (if configured) and
+                // nack without requeue so the message is not redelivered
+                // forever (poison message handling).
+                this.logger.error(
+                  `Message on queue "${queueName}" failed after ${attempts} ` +
+                    `attempts; routing to DLQ: ${options.dlq ?? '(none, dropping)'}`,
+                  error instanceof Error ? error.stack : String(error),
+                );
+                if (options.dlq) {
+                  channel.publish(this.exchangeName, options.dlq, msg.content, {
+                    persistent: true,
+                    headers: {
+                      'x-original-routing-key': routingKey,
+                      'x-original-error':
+                        error instanceof Error ? error.message : String(error),
+                    },
+                  });
+                }
+                channel.nack(msg, false, false);
+              } else {
+                // Transient failure: requeue for a later attempt
+                this.logger.warn(
+                  `Message on queue "${queueName}" failed ` +
+                    `(attempt ${attempts}/${maxRetries}); requeueing: ` +
+                    `${error instanceof Error ? error.message : String(error)}`,
+                );
+                channel.nack(msg, false, true);
+              }
             }
           }
         });
       });
     }
+  }
+
+  /**
+   * Computes how many times a message has been delivered, based on the
+   * broker-managed x-death header that is attached on every requeue.
+   * First delivery (no header yet) counts as attempt 1.
+   */
+  private deliveryAttempts(msg: ConsumeMessage): number {
+    const death = msg.properties.headers?.['x-death'];
+    if (Array.isArray(death) && death.length > 0) {
+      const count = (death[0] as { count?: unknown } | null)?.count;
+      if (typeof count === 'number') {
+        return count + 1;
+      }
+    }
+    return 1;
   }
 }

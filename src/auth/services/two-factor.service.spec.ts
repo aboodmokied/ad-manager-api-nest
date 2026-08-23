@@ -93,6 +93,7 @@ describe('TwoFactorService', () => {
     passwordHash: hashedPassword,
     twoFactorEnabled: false,
     twoFactorSecret: null,
+    twoFactorRecoveryCodes: [],
     emailVerified: true,
     oauthProvider: null,
     oauthProviderId: null,
@@ -201,17 +202,16 @@ describe('TwoFactorService', () => {
 
   describe('verifyRecoveryCode', () => {
     it('issues tokens when a valid unused recovery code is presented', async () => {
-      prisma.user.findUnique.mockResolvedValue(
-        makeUser({ twoFactorEnabled: true }),
-      );
-
       const plainCode = 'a1b2c-d3e4f';
       const hash = createHash('sha256')
         .update(plainCode.replace('-', '').toUpperCase())
         .digest('hex');
-      await fakeRedis.set(
-        '2fa-recovery:user-1',
-        JSON.stringify([hash, 'other-hash']),
+
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser({
+          twoFactorEnabled: true,
+          twoFactorRecoveryCodes: [hash, 'other-hash'],
+        }),
       );
 
       const loginToken = await getLoginToken();
@@ -222,16 +222,19 @@ describe('TwoFactorService', () => {
 
       expect(result.accessToken).toBeDefined();
       expect(result.refreshToken).toBeDefined();
-      const stored = JSON.parse(await fakeRedis.get('2fa-recovery:user-1'));
-      expect(stored).not.toContain(hash);
-      expect(stored).toContain('other-hash');
+      expect(prisma.user.update).toHaveBeenCalledWith({
+        where: { id: 'user-1' },
+        data: { twoFactorRecoveryCodes: ['other-hash'] },
+      });
     });
 
     it('rejects an unknown or already-used recovery code', async () => {
       prisma.user.findUnique.mockResolvedValue(
-        makeUser({ twoFactorEnabled: true }),
+        makeUser({
+          twoFactorEnabled: true,
+          twoFactorRecoveryCodes: ['some-hash'],
+        }),
       );
-      await fakeRedis.set('2fa-recovery:user-1', JSON.stringify(['some-hash']));
 
       const loginToken = await getLoginToken();
       await expect(
@@ -311,7 +314,10 @@ describe('TwoFactorService', () => {
       expect(result.recoveryCodes).toHaveLength(10);
       expect(prisma.user.update).toHaveBeenCalledWith({
         where: { id: 'user-1' },
-        data: { twoFactorEnabled: true },
+        data: {
+          twoFactorEnabled: true,
+          twoFactorRecoveryCodes: expect.any(Array),
+        },
       });
       expect(prisma.refreshToken.updateMany).toHaveBeenCalledWith({
         where: { userId: 'user-1', revokedAt: null },
@@ -319,7 +325,7 @@ describe('TwoFactorService', () => {
       });
     });
 
-    it('stores hashed (never plaintext) recovery codes in Redis', async () => {
+    it('stores hashed (never plaintext) recovery codes in database', async () => {
       const secret = authenticator.generateSecret();
       prisma.user.findUnique.mockResolvedValue(
         makeUser({ twoFactorSecret: secret }),
@@ -331,14 +337,18 @@ describe('TwoFactorService', () => {
       const code = authenticator.generate(secret);
       const result = await service.enableTwoFactor('user-1', { code });
 
-      const raw = await fakeRedis.get('2fa-recovery:user-1');
-      const storedHashes = JSON.parse(raw);
       const sampleHash = result.recoveryCodes[0].replace('-', '').toUpperCase();
       const expectedHash = createHash('sha256')
         .update(sampleHash)
         .digest('hex');
-      expect(storedHashes).toContain(expectedHash);
-      expect(storedHashes).not.toContain(result.recoveryCodes[0]);
+
+      expect(prisma.user.update).toHaveBeenCalledWith({
+        where: { id: 'user-1' },
+        data: {
+          twoFactorEnabled: true,
+          twoFactorRecoveryCodes: expect.arrayContaining([expectedHash]),
+        },
+      });
     });
 
     it('rejects an incorrect verification code', async () => {
@@ -380,10 +390,6 @@ describe('TwoFactorService', () => {
         makeUser({ twoFactorEnabled: true, twoFactorSecret: secret }),
       );
       prisma.user.update.mockResolvedValue(makeUser());
-      await fakeRedis.set(
-        '2fa-recovery:user-1',
-        JSON.stringify(['hash1', 'hash2']),
-      );
 
       const code = authenticator.generate(secret);
       const result = await service.disableTwoFactor('user-1', {
@@ -396,13 +402,16 @@ describe('TwoFactorService', () => {
       );
       expect(prisma.user.update).toHaveBeenCalledWith({
         where: { id: 'user-1' },
-        data: { twoFactorEnabled: false, twoFactorSecret: null },
+        data: {
+          twoFactorEnabled: false,
+          twoFactorSecret: null,
+          twoFactorRecoveryCodes: [],
+        },
       });
       expect(prisma.refreshToken.updateMany).toHaveBeenCalledWith({
         where: { userId: 'user-1', revokedAt: null },
         data: { revokedAt: expect.any(Date) },
       });
-      expect(await fakeRedis.get('2fa-recovery:user-1')).toBeNull();
     });
 
     it('rejects a wrong password even with a valid code', async () => {

@@ -17,8 +17,9 @@ model User {
   email            String   @unique // Login email (unique - one account per email)
   passwordHash     String   // Password stored as a bcrypt hash (never plaintext)
   twoFactorEnabled Boolean  @default(false) // Whether 2FA (TOTP) is enabled for this account
-  twoFactorSecret  String?  // TOTP secret used to verify 2FA codes (nullable until enabled)
-  emailVerified    Boolean  @default(false) // Whether the email address was verified via the emailed link
+  twoFactorSecret        String?  // TOTP secret used to verify 2FA codes (nullable until enabled)
+  twoFactorRecoveryCodes String[] @default([]) // Hashed backup recovery codes for 2FA
+  emailVerified          Boolean  @default(false) // Whether the email address was verified via the emailed link
   oauthProvider    String?  // OAuth provider used to create/link this account (e.g. "google")
   oauthProviderId  String?  // Unique user ID from the OAuth provider
   createdAt        DateTime @default(now())
@@ -49,8 +50,20 @@ model RefreshToken {
 
 // Enum representing supported advertising platforms
 enum Platform {
-  META   // Meta Ads (Facebook/Instagram)
-  GOOGLE // Google Ads
+  META    // Meta Ads (Facebook/Instagram)
+  GOOGLE  // Google Ads
+  LINKEDIN // LinkedIn Ads
+  X       // X (Twitter) Ads
+  SNAPCHAT // Snapchat Ads
+  TIKTOK  // TikTok Ads
+}
+
+// Enum representing the connection lifecycle of an advertising account
+enum ConnectedAccountStatus {
+  CONNECTED                 // Linked and the access token is valid
+  DISCONNECTED              // User disconnected the account (tokens cleared)
+  TOKEN_EXPIRED             // Access token expired; refresh not yet attempted
+  REAUTHORIZATION_REQUIRED  // Token refresh failed; user must re-connect
 }
 
 // Enum representing the status of a campaign
@@ -63,17 +76,24 @@ enum CampaignStatus {
 
 // Model for storing connected OAuth accounts for ad platforms
 model ConnectedAccount {
-  id           String    @id @default(cuid())
-  userId       String    // ID of the user who owns this account
-  platform     Platform  // The ad platform this account is for
-  accessToken  String    // OAuth access token for the platform
-  refreshToken String?   // OAuth refresh token (optional, depending on platform)
-  expiresAt    DateTime? // When the access token expires (optional)
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  id                String                 @id @default(cuid())
+  userId            String                 // ID of the user who owns this account
+  platform          Platform               // The ad platform this account is for
+  status            ConnectedAccountStatus @default(CONNECTED) // Connection lifecycle status
+  accessToken       String                 // AES-256-GCM encrypted OAuth access token (never plaintext)
+  refreshToken      String?                // AES-256-GCM encrypted OAuth refresh token (optional)
+  expiresAt         DateTime?              // When the access token expires (optional)
+  tenantId          String                 // Tenant that owns this connection
+  platformAccountId String?                // Ad account id on the provider side (e.g. Meta ad account / Google customer id)
+  lastSyncedAt      DateTime?              // When the platform campaigns were last imported
+  createdAt         DateTime               @default(now())
+  updatedAt         DateTime               @updatedAt
 
   // Unique constraint: a user can't have multiple accounts for the same platform
   @@unique([userId, platform])
+
+  // Index for listing a user's connections
+  @@index([userId])
 }
 
 // Canonical UACM Campaign model - the single source of truth for a campaign
@@ -110,6 +130,9 @@ model PlatformCampaign {
 
   // Unique constraint: one platform campaign per UACM campaign and platform
   @@unique([uacmCampaignId, platform])
+
+  // Index for import lookups by (platform, external platform campaign id)
+  @@index([platform, platformCampaignId])
 }
 
 // Model for storing campaign performance metrics

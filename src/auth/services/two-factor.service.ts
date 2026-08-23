@@ -11,10 +11,7 @@ import { RedisService } from '../../redis/redis.service';
 import { TokenService } from './token.service';
 import { EnableTwoFactorDto } from '../dto/enable-two-factor.dto';
 import { DisableTwoFactorDto } from '../dto/disable-two-factor.dto';
-import {
-  RECOVERY_CODE_COUNT,
-  RECOVERY_CODE_TTL_SECONDS,
-} from '../constant/auth-messages';
+import { RECOVERY_CODE_COUNT } from '../constant/auth-messages';
 import {
   createTotpUri,
   generateRecoveryCodes,
@@ -23,11 +20,10 @@ import {
   normalizeRecoveryCode,
   verifyTotpCode,
 } from '../utils/totp.util';
-import { requireRedis } from 'src/common/utils/redis.util';
 
 /**
- * TOTP setup/enable/disable plus one-time recovery codes, stored hashed in
- * Redis. Flows that complete a login delegate token issuance to TokenService.
+ * TOTP setup/enable/disable plus one-time recovery codes, persisted hashed in
+ * the database. Flows that complete a login delegate token issuance to TokenService.
  */
 @Injectable()
 export class TwoFactorService {
@@ -69,7 +65,7 @@ export class TwoFactorService {
     );
   }
 
-  /** Completes a login with a single-use recovery code (stored hashed). */
+  /** Completes a login with a single-use recovery code (stored hashed in database). */
   async verifyRecoveryCode(loginToken: string, recoveryCode: string) {
     const payload = await this.tokenService.verifyTypedToken(
       loginToken,
@@ -89,11 +85,7 @@ export class TwoFactorService {
       );
     }
 
-    const redis = requireRedis(this.redisService);
-
-    const raw = await redis.get(this.recoveryCodesKey(user.id));
-    const storedHashes: string[] = raw ? JSON.parse(raw) : [];
-
+    const storedHashes: string[] = user.twoFactorRecoveryCodes ?? [];
     const presentedHash = hashRecoveryCode(normalizeRecoveryCode(recoveryCode));
     const index = storedHashes.indexOf(presentedHash);
 
@@ -102,13 +94,12 @@ export class TwoFactorService {
     }
 
     // Recovery codes are single-use: remove the used code and persist the rest
-    storedHashes.splice(index, 1);
-    await redis.set(
-      this.recoveryCodesKey(user.id),
-      JSON.stringify(storedHashes),
-      'EX',
-      RECOVERY_CODE_TTL_SECONDS,
-    );
+    const remainingHashes = [...storedHashes];
+    remainingHashes.splice(index, 1);
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: { twoFactorRecoveryCodes: remainingHashes },
+    });
 
     return this.tokenService.issueTokens(
       user.id,
@@ -162,16 +153,22 @@ export class TwoFactorService {
       throw new UnauthorizedException('Invalid verification code');
     }
 
+    // Generate single-use recovery codes as a fallback for lost authenticator devices
+    const recoveryCodes = generateRecoveryCodes(RECOVERY_CODE_COUNT);
+    const hashed = recoveryCodes.map((code) =>
+      hashRecoveryCode(normalizeRecoveryCode(code)),
+    );
+
     await this.prisma.user.update({
       where: { id: user.id },
-      data: { twoFactorEnabled: true },
+      data: {
+        twoFactorEnabled: true,
+        twoFactorRecoveryCodes: hashed,
+      },
     });
 
     // Invalidate all existing sessions now that 2FA is required
     await this.tokenService.revokeAllRefreshTokens(user.id);
-
-    // Issue one-time recovery codes as a fallback for lost authenticator devices
-    const recoveryCodes = await this.issueRecoveryCodes(user.id);
 
     return {
       message: 'Two-factor authentication enabled successfully',
@@ -204,12 +201,15 @@ export class TwoFactorService {
 
     await this.prisma.user.update({
       where: { id: user.id },
-      data: { twoFactorEnabled: false, twoFactorSecret: null },
+      data: {
+        twoFactorEnabled: false,
+        twoFactorSecret: null,
+        twoFactorRecoveryCodes: [],
+      },
     });
 
-    // Invalidate existing sessions and delete recovery codes
+    // Invalidate existing sessions
     await this.tokenService.revokeAllRefreshTokens(user.id);
-    await this.clearRecoveryCodes(user.id);
 
     return { message: 'Two-factor authentication disabled successfully' };
   }
@@ -220,27 +220,18 @@ export class TwoFactorService {
       hashRecoveryCode(normalizeRecoveryCode(code)),
     );
 
-    const redis = this.redisService.getClient();
-    if (redis) {
-      await redis.set(
-        this.recoveryCodesKey(userId),
-        JSON.stringify(hashed),
-        'EX',
-        RECOVERY_CODE_TTL_SECONDS,
-      );
-    }
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { twoFactorRecoveryCodes: hashed },
+    });
 
     return codes;
   }
 
   async clearRecoveryCodes(userId: string): Promise<void> {
-    const redis = this.redisService.getClient();
-    if (redis) {
-      await redis.del(this.recoveryCodesKey(userId));
-    }
-  }
-
-  private recoveryCodesKey(userId: string): string {
-    return `2fa-recovery:${userId}`;
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { twoFactorRecoveryCodes: [] },
+    });
   }
 }
