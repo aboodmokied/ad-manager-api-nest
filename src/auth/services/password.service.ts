@@ -19,7 +19,7 @@ import {
   PASSWORD_RESET_TOKEN_EXPIRES_IN,
   PASSWORD_RESET_TOKEN_TTL_SECONDS,
   DUMMY_PASSWORD_HASH,
-} from '../constant/auth-messages';
+} from '../constants/auth-messages';
 
 /**
  * Password reset flow: issues a nonce-bound reset link, emails it, and

@@ -1,9 +1,6 @@
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '../prisma/prisma.module';
 import { AuthModule } from '../auth/auth.module';
-import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
-import { ThrottleGuard } from 'src/common/guards/throttle.guard';
-import { TokenRevocationService } from '../auth/services/token-revocation.service';
 import { AccountsController } from './accounts.controller';
 import { AccountsService } from './services/accounts.service';
 import { OAuthConfigService } from './services/oauth-config.service';
@@ -12,7 +9,6 @@ import { OAuthExchangeService } from './services/oauth-exchange.service';
 import { TokenEncryptionService } from './services/token-encryption.service';
 import { TokenVaultService } from './services/token-vault.service';
 import { AccountNotificationService } from './services/account-notification.service';
-import { TenantResolverService } from './services/tenant-resolver.service';
 import { CampaignImportService } from './services/campaign-import.service';
 import { CampaignImportRunner } from './services/campaign-import.runner';
 import { CampaignImportWorker } from './workers/campaign-import.worker';
@@ -31,6 +27,9 @@ import { ConnectorFactory } from './connectors/connector-factory';
  * callback -> encrypted credential storage -> immediate campaign import) and
  * the connection lifecycle (connected/disconnected/token-expired/
  * reauthorization-required) with refresh handling and user notifications.
+ *
+ * Guards (JwtAuthGuard, ThrottleGuard) and TokenRevocationService are
+ * imported via AuthModule — not re-registered here to avoid DI conflicts.
  */
 @Module({
   imports: [PrismaModule, AuthModule],
@@ -43,7 +42,6 @@ import { ConnectorFactory } from './connectors/connector-factory';
     TokenEncryptionService,
     TokenVaultService,
     AccountNotificationService,
-    TenantResolverService,
     CampaignImportService,
     CampaignImportRunner,
     CampaignImportWorker,
@@ -54,10 +52,13 @@ import { ConnectorFactory } from './connectors/connector-factory';
     SnapchatConnector,
     TiktokConnector,
     ConnectorFactory,
-    JwtAuthGuard,
-    ThrottleGuard,
-    TokenRevocationService,
   ],
-  exports: [TokenVaultService],
+  exports: [
+    TokenVaultService,
+    OAuthExchangeService,
+    OAuthConfigService,
+    TokenEncryptionService,
+  ],
 })
 export class AccountsModule {}
+

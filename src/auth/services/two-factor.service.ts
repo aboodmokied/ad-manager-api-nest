@@ -1,5 +1,6 @@
 import {
   Injectable,
+  Logger,
   ConflictException,
   UnauthorizedException,
   NotFoundException,
@@ -9,9 +10,10 @@ import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RedisService } from '../../redis/redis.service';
 import { TokenService } from './token.service';
+import { TokenEncryptionService } from '../../common/services/token-encryption.service';
 import { EnableTwoFactorDto } from '../dto/enable-two-factor.dto';
 import { DisableTwoFactorDto } from '../dto/disable-two-factor.dto';
-import { RECOVERY_CODE_COUNT } from '../constant/auth-messages';
+import { RECOVERY_CODE_COUNT } from '../constants/auth-messages';
 import {
   createTotpUri,
   generateRecoveryCodes,
@@ -23,15 +25,45 @@ import {
 
 /**
  * TOTP setup/enable/disable plus one-time recovery codes, persisted hashed in
- * the database. Flows that complete a login delegate token issuance to TokenService.
+ * the database. TOTP secrets are encrypted at rest with versioned ciphertext (v1:...)
+ * using TokenEncryptionService while maintaining backward compatibility via dual-read.
  */
 @Injectable()
 export class TwoFactorService {
+  private readonly logger = new Logger(TwoFactorService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly redisService: RedisService,
     private readonly tokenService: TokenService,
+    private readonly tokenEncryption: TokenEncryptionService,
   ) {}
+
+  /**
+   * Resolves the plaintext TOTP secret from persisted storage.
+   * Preserves backward-compatibility by supporting both:
+   * 1. Versioned encrypted secrets (`v1:...`) encrypted at rest via TokenEncryptionService.
+   * 2. Legacy unencrypted plaintext secrets (dual-read fallback).
+   */
+  private resolveTotpSecret(persistedSecret: string): string {
+    if (!persistedSecret) {
+      return '';
+    }
+    if (persistedSecret.startsWith('v1:')) {
+      try {
+        return this.tokenEncryption.decrypt(persistedSecret);
+      } catch (err: any) {
+        this.logger.error(
+          `Failed to decrypt versioned TOTP secret: ${err?.message || err}`,
+        );
+        throw new UnauthorizedException(
+          'Failed to decrypt two-factor authentication secret',
+        );
+      }
+    }
+    // Backward compatibility: handle existing unencrypted secrets
+    return persistedSecret;
+  }
 
   /** Verifies a 2FA code against the account bound to the login token. */
   async verifyTwoFactor(loginToken: string, code: string) {
@@ -53,9 +85,18 @@ export class TwoFactorService {
       );
     }
 
-    const codeValid = verifyTotpCode(code, user.twoFactorSecret);
+    const plainSecret = this.resolveTotpSecret(user.twoFactorSecret);
+    const codeValid = verifyTotpCode(code, plainSecret);
     if (!codeValid) {
       throw new UnauthorizedException('Invalid verification code');
+    }
+
+    // Lazy migration: upgrade legacy plaintext secret to encrypted at rest
+    if (!user.twoFactorSecret.startsWith('v1:')) {
+      await this.prisma.user.update({
+        where: { id: user.id },
+        data: { twoFactorSecret: this.tokenEncryption.encrypt(plainSecret) },
+      });
     }
 
     return this.tokenService.issueTokens(
@@ -124,9 +165,10 @@ export class TwoFactorService {
     const secret = generateTotpSecret();
     const otpauthUrl = createTotpUri(user.email, secret);
 
+    // Persist secret encrypted at rest using versioned ciphertext
     await this.prisma.user.update({
       where: { id: user.id },
-      data: { twoFactorSecret: secret },
+      data: { twoFactorSecret: this.tokenEncryption.encrypt(secret) },
     });
 
     return { secret, otpauthUrl };
@@ -148,7 +190,8 @@ export class TwoFactorService {
       throw new BadRequestException('Please request a 2FA setup first');
     }
 
-    const codeValid = verifyTotpCode(dto.code, user.twoFactorSecret);
+    const plainSecret = this.resolveTotpSecret(user.twoFactorSecret);
+    const codeValid = verifyTotpCode(dto.code, plainSecret);
     if (!codeValid) {
       throw new UnauthorizedException('Invalid verification code');
     }
@@ -159,12 +202,23 @@ export class TwoFactorService {
       hashRecoveryCode(normalizeRecoveryCode(code)),
     );
 
+    const updateData: {
+      twoFactorEnabled: boolean;
+      twoFactorRecoveryCodes: string[];
+      twoFactorSecret?: string;
+    } = {
+      twoFactorEnabled: true,
+      twoFactorRecoveryCodes: hashed,
+    };
+
+    // Lazy migration: upgrade legacy plaintext secret to encrypted at rest
+    if (!user.twoFactorSecret.startsWith('v1:')) {
+      updateData.twoFactorSecret = this.tokenEncryption.encrypt(plainSecret);
+    }
+
     await this.prisma.user.update({
       where: { id: user.id },
-      data: {
-        twoFactorEnabled: true,
-        twoFactorRecoveryCodes: hashed,
-      },
+      data: updateData,
     });
 
     // Invalidate all existing sessions now that 2FA is required
@@ -194,7 +248,8 @@ export class TwoFactorService {
       throw new UnauthorizedException('Invalid password');
     }
 
-    const codeValid = verifyTotpCode(dto.code, user.twoFactorSecret);
+    const plainSecret = this.resolveTotpSecret(user.twoFactorSecret);
+    const codeValid = verifyTotpCode(dto.code, plainSecret);
     if (!codeValid) {
       throw new UnauthorizedException('Invalid verification code');
     }

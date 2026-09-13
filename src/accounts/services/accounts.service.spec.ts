@@ -16,7 +16,7 @@ import { OAuthExchangeService } from './oauth-exchange.service';
 import { TokenEncryptionService } from './token-encryption.service';
 import { TokenVaultService } from './token-vault.service';
 import { AccountNotificationService } from './account-notification.service';
-import { TenantResolverService } from './tenant-resolver.service';
+import { TenantResolverService } from '../../common/services/tenant-resolver.service';
 import { CampaignImportService } from './campaign-import.service';
 import { CampaignImportRunner } from './campaign-import.runner';
 import { MetaConnector } from '../connectors/meta-connector';
@@ -139,6 +139,7 @@ describe('AccountsService - Connect Advertising Account via OAuth', () => {
       platformCampaign,
       uacmCampaign,
       user: userModel,
+      $transaction: jest.fn().mockImplementation(async (cb) => cb(prisma)),
     };
     userModel.findUnique.mockResolvedValue({ id: 'user-1', email: user.email });
     connectedAccount.update.mockImplementation(async ({ where, data }) =>

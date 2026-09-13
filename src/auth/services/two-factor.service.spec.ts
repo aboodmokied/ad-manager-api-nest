@@ -11,6 +11,7 @@ import * as bcrypt from 'bcryptjs';
 import { authenticator } from 'otplib';
 import { TwoFactorService } from './two-factor.service';
 import { TokenService } from './token.service';
+import { TokenEncryptionService } from '../../common/services/token-encryption.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RedisService } from '../../redis/redis.service';
 import { TokenRevocationService } from './token-revocation.service';
@@ -67,6 +68,7 @@ class FakeRedis {
 describe('TwoFactorService', () => {
   let service: TwoFactorService;
   let jwtService: JwtService;
+  let encryptionService: TokenEncryptionService;
   let prisma: {
     user: {
       findUnique: jest.Mock;
@@ -128,12 +130,16 @@ describe('TwoFactorService', () => {
     fakeRedis = new FakeRedis();
     redisService = { getClient: jest.fn(() => fakeRedis) };
     configService = { get: jest.fn(() => undefined) };
+    encryptionService = new TokenEncryptionService(
+      new ConfigService({ TOKEN_ENCRYPTION_KEY: 'test-key-32-chars-length-long!' }),
+    );
 
     const module: TestingModule = await Test.createTestingModule({
       imports: [JwtModule.register({ secret: 'test-secret' })],
       providers: [
         TwoFactorService,
         TokenService,
+        { provide: TokenEncryptionService, useValue: encryptionService },
         { provide: PrismaService, useValue: prisma },
         { provide: RedisService, useValue: redisService },
         { provide: TokenRevocationService, useValue: tokenRevocation },
@@ -154,10 +160,11 @@ describe('TwoFactorService', () => {
   });
 
   describe('verifyTwoFactor', () => {
-    it('issues an access JWT when the code is correct', async () => {
+    it('issues an access JWT when the code is correct with an encrypted secret', async () => {
       const secret = authenticator.generateSecret();
+      const encryptedSecret = encryptionService.encrypt(secret);
       prisma.user.findUnique.mockResolvedValue(
-        makeUser({ twoFactorEnabled: true, twoFactorSecret: secret }),
+        makeUser({ twoFactorEnabled: true, twoFactorSecret: encryptedSecret }),
       );
 
       const loginToken = await getLoginToken();
@@ -169,12 +176,45 @@ describe('TwoFactorService', () => {
       const decoded: any = jwtService.decode(result.accessToken);
       expect(decoded.sub).toBe('user-1');
       expect(decoded.type).toBe('access');
+      expect(prisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it('supports dual-read for legacy plaintext secret and lazily upgrades it to encrypted', async () => {
+      const secret = authenticator.generateSecret();
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser({ twoFactorEnabled: true, twoFactorSecret: secret }),
+      );
+
+      const loginToken = await getLoginToken();
+      const code = authenticator.generate(secret);
+
+      const result: any = await service.verifyTwoFactor(loginToken, code);
+
+      expect(result.accessToken).toBeDefined();
+      expect(prisma.user.update).toHaveBeenCalledWith({
+        where: { id: 'user-1' },
+        data: { twoFactorSecret: expect.stringMatching(/^v1:/) },
+      });
+      const upgradedSecret = prisma.user.update.mock.calls[0][0].data.twoFactorSecret;
+      expect(encryptionService.decrypt(upgradedSecret)).toBe(secret);
+    });
+
+    it('rejects tampered or corrupted encrypted secret', async () => {
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser({ twoFactorEnabled: true, twoFactorSecret: 'v1:invalid_corrupt_payload' }),
+      );
+
+      const loginToken = await getLoginToken();
+      await expect(
+        service.verifyTwoFactor(loginToken, '123456'),
+      ).rejects.toThrow(UnauthorizedException);
     });
 
     it('rejects an incorrect verification code', async () => {
       const secret = authenticator.generateSecret();
+      const encryptedSecret = encryptionService.encrypt(secret);
       prisma.user.findUnique.mockResolvedValue(
-        makeUser({ twoFactorEnabled: true, twoFactorSecret: secret }),
+        makeUser({ twoFactorEnabled: true, twoFactorSecret: encryptedSecret }),
       );
 
       const loginToken = await getLoginToken();
@@ -259,7 +299,7 @@ describe('TwoFactorService', () => {
   });
 
   describe('setupTwoFactor', () => {
-    it('generates a secret and otpauth URL, and stores the secret', async () => {
+    it('generates a secret and otpauth URL, and stores the encrypted secret at rest', async () => {
       const user = makeUser();
       prisma.user.findUnique.mockResolvedValue(user);
       prisma.user.update.mockResolvedValue(user);
@@ -271,8 +311,10 @@ describe('TwoFactorService', () => {
       expect(result.otpauthUrl).toContain(email.replace('@', '%40'));
       expect(prisma.user.update).toHaveBeenCalledWith({
         where: { id: 'user-1' },
-        data: { twoFactorSecret: result.secret },
+        data: { twoFactorSecret: expect.stringMatching(/^v1:/) },
       });
+      const savedSecret = prisma.user.update.mock.calls[0][0].data.twoFactorSecret;
+      expect(encryptionService.decrypt(savedSecret)).toBe(result.secret);
     });
 
     it('rejects setup when 2FA is already enabled', async () => {
@@ -295,13 +337,14 @@ describe('TwoFactorService', () => {
   });
 
   describe('enableTwoFactor', () => {
-    it('enables 2FA, returns recovery codes and revokes existing sessions', async () => {
+    it('enables 2FA with encrypted secret, returns recovery codes and revokes existing sessions', async () => {
       const secret = authenticator.generateSecret();
+      const encryptedSecret = encryptionService.encrypt(secret);
       prisma.user.findUnique.mockResolvedValue(
-        makeUser({ twoFactorSecret: secret }),
+        makeUser({ twoFactorSecret: encryptedSecret }),
       );
       prisma.user.update.mockResolvedValue(
-        makeUser({ twoFactorEnabled: true, twoFactorSecret: secret }),
+        makeUser({ twoFactorEnabled: true, twoFactorSecret: encryptedSecret }),
       );
 
       const code = authenticator.generate(secret);
@@ -325,13 +368,41 @@ describe('TwoFactorService', () => {
       });
     });
 
-    it('stores hashed (never plaintext) recovery codes in database', async () => {
+    it('supports dual-read for legacy plaintext secret and upgrades to encrypted during enable', async () => {
       const secret = authenticator.generateSecret();
       prisma.user.findUnique.mockResolvedValue(
         makeUser({ twoFactorSecret: secret }),
       );
       prisma.user.update.mockResolvedValue(
         makeUser({ twoFactorEnabled: true, twoFactorSecret: secret }),
+      );
+
+      const code = authenticator.generate(secret);
+      const result = await service.enableTwoFactor('user-1', { code });
+
+      expect(result.message).toBe(
+        'Two-factor authentication enabled successfully',
+      );
+      expect(prisma.user.update).toHaveBeenCalledWith({
+        where: { id: 'user-1' },
+        data: expect.objectContaining({
+          twoFactorEnabled: true,
+          twoFactorRecoveryCodes: expect.any(Array),
+          twoFactorSecret: expect.stringMatching(/^v1:/),
+        }),
+      });
+      const savedSecret = prisma.user.update.mock.calls[0][0].data.twoFactorSecret;
+      expect(encryptionService.decrypt(savedSecret)).toBe(secret);
+    });
+
+    it('stores hashed (never plaintext) recovery codes in database', async () => {
+      const secret = authenticator.generateSecret();
+      const encryptedSecret = encryptionService.encrypt(secret);
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser({ twoFactorSecret: encryptedSecret }),
+      );
+      prisma.user.update.mockResolvedValue(
+        makeUser({ twoFactorEnabled: true, twoFactorSecret: encryptedSecret }),
       );
 
       const code = authenticator.generate(secret);
@@ -353,8 +424,9 @@ describe('TwoFactorService', () => {
 
     it('rejects an incorrect verification code', async () => {
       const secret = authenticator.generateSecret();
+      const encryptedSecret = encryptionService.encrypt(secret);
       prisma.user.findUnique.mockResolvedValue(
-        makeUser({ twoFactorSecret: secret }),
+        makeUser({ twoFactorSecret: encryptedSecret }),
       );
 
       await expect(
@@ -365,8 +437,9 @@ describe('TwoFactorService', () => {
 
     it('rejects enabling when 2FA is already enabled', async () => {
       const secret = authenticator.generateSecret();
+      const encryptedSecret = encryptionService.encrypt(secret);
       prisma.user.findUnique.mockResolvedValue(
-        makeUser({ twoFactorEnabled: true, twoFactorSecret: secret }),
+        makeUser({ twoFactorEnabled: true, twoFactorSecret: encryptedSecret }),
       );
 
       await expect(
@@ -384,10 +457,11 @@ describe('TwoFactorService', () => {
   });
 
   describe('disableTwoFactor', () => {
-    it('disables 2FA when code and password match, and revokes sessions', async () => {
+    it('disables 2FA when encrypted secret, code and password match, and revokes sessions', async () => {
       const secret = authenticator.generateSecret();
+      const encryptedSecret = encryptionService.encrypt(secret);
       prisma.user.findUnique.mockResolvedValue(
-        makeUser({ twoFactorEnabled: true, twoFactorSecret: secret }),
+        makeUser({ twoFactorEnabled: true, twoFactorSecret: encryptedSecret }),
       );
       prisma.user.update.mockResolvedValue(makeUser());
 
@@ -414,10 +488,37 @@ describe('TwoFactorService', () => {
       });
     });
 
-    it('rejects a wrong password even with a valid code', async () => {
+    it('supports dual-read when legacy plaintext secret is disabled', async () => {
       const secret = authenticator.generateSecret();
       prisma.user.findUnique.mockResolvedValue(
         makeUser({ twoFactorEnabled: true, twoFactorSecret: secret }),
+      );
+      prisma.user.update.mockResolvedValue(makeUser());
+
+      const code = authenticator.generate(secret);
+      const result = await service.disableTwoFactor('user-1', {
+        code,
+        password,
+      });
+
+      expect(result.message).toBe(
+        'Two-factor authentication disabled successfully',
+      );
+      expect(prisma.user.update).toHaveBeenCalledWith({
+        where: { id: 'user-1' },
+        data: {
+          twoFactorEnabled: false,
+          twoFactorSecret: null,
+          twoFactorRecoveryCodes: [],
+        },
+      });
+    });
+
+    it('rejects a wrong password even with a valid code', async () => {
+      const secret = authenticator.generateSecret();
+      const encryptedSecret = encryptionService.encrypt(secret);
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser({ twoFactorEnabled: true, twoFactorSecret: encryptedSecret }),
       );
 
       const code = authenticator.generate(secret);
@@ -432,8 +533,9 @@ describe('TwoFactorService', () => {
 
     it('rejects an incorrect verification code', async () => {
       const secret = authenticator.generateSecret();
+      const encryptedSecret = encryptionService.encrypt(secret);
       prisma.user.findUnique.mockResolvedValue(
-        makeUser({ twoFactorEnabled: true, twoFactorSecret: secret }),
+        makeUser({ twoFactorEnabled: true, twoFactorSecret: encryptedSecret }),
       );
 
       await expect(

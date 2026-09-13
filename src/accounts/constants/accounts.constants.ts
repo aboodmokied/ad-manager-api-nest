@@ -1,9 +1,3 @@
-/**
- * Constants shared by the ad-account connection module.
- * Central file so values stay consistent across services, workers
- * and tests without duplicating literals.
- */
-
 /** How long an OAuth state token stays valid in Redis (10 minutes). */
 export const OAUTH_STATE_TTL_SECONDS = 10 * 60;
 

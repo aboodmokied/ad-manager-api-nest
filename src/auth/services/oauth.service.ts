@@ -21,7 +21,7 @@ import {
   GOOGLE_OAUTH_TOKEN_URL,
   GOOGLE_OAUTH_USERINFO_URL,
   GOOGLE_OAUTH_SCOPE,
-} from '../constant/auth-messages';
+} from '../constants/auth-messages';
 
 /**
  * Google OAuth: consent URL generation, authorization-code exchange, profile

@@ -23,10 +23,10 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
-import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
-import { ThrottleGuard } from 'src/common/guards/throttle.guard';
-import { Throttle } from 'src/common/decorators/throttle.decorator';
-import { CurrentUser } from 'src/common/decorators/current-user.decorator';
+import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { ThrottleGuard } from '../common/guards/throttle.guard';
+import { Throttle } from '../common/decorators/throttle.decorator';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { AccountsService } from './services/accounts.service';
 import { ConnectAdAccountDto } from './dto/connect-ad-account.dto';
 import { ReconnectAdAccountDto } from './dto/reconnect-ad-account.dto';

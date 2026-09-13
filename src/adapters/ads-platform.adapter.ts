@@ -26,11 +26,24 @@ export interface CreateCampaignRequest {
 }
 
 /**
+ * Request payload for updating an existing campaign on an ad platform
+ */
+export interface UpdateCampaignRequest {
+  platformCampaignId: string; // ID of the campaign on the ad platform
+  name?: string; // Updated name (optional)
+  budget?: number; // Updated budget (optional)
+  startDate?: Date; // Updated start date (optional)
+  endDate?: Date; // Updated end date (optional)
+  platformSpecificData?: any; // Updated platform-specific configuration (optional)
+}
+
+/**
  * Request payload for updating a campaign's budget on an ad platform
  */
 export interface UpdateBudgetRequest {
   platformCampaignId: string; // ID of the campaign on the ad platform
   newBudget: number; // New budget amount
+  accountId?: string; // Ad account id on the provider side (required by some platforms)
 }
 
 /**
@@ -53,6 +66,16 @@ export interface AdsPlatformAdapter {
   ): Promise<string>;
 
   /**
+   * Updates an existing campaign on the ad platform
+   * @param request - The campaign update request
+   * @param accessToken - OAuth access token for the platform
+   */
+  updateCampaign(
+    request: UpdateCampaignRequest,
+    accessToken: string,
+  ): Promise<void>;
+
+  /**
    * Updates the budget of an existing campaign on the ad platform
    * @param request - The budget update request
    * @param accessToken - OAuth access token for the platform
@@ -60,6 +83,30 @@ export interface AdsPlatformAdapter {
   updateBudget(
     request: UpdateBudgetRequest,
     accessToken: string,
+  ): Promise<void>;
+
+  /**
+   * Pauses a campaign on the ad platform
+   * @param platformCampaignId - ID of the campaign on the ad platform
+   * @param accessToken - OAuth access token for the platform
+   * @param accountId - Ad account id (required by some platforms)
+   */
+  pauseCampaign(
+    platformCampaignId: string,
+    accessToken: string,
+    accountId?: string,
+  ): Promise<void>;
+
+  /**
+   * Resumes a paused campaign on the ad platform
+   * @param platformCampaignId - ID of the campaign on the ad platform
+   * @param accessToken - OAuth access token for the platform
+   * @param accountId - Ad account id (required by some platforms)
+   */
+  resumeCampaign(
+    platformCampaignId: string,
+    accessToken: string,
+    accountId?: string,
   ): Promise<void>;
 
   /**
@@ -71,6 +118,7 @@ export interface AdsPlatformAdapter {
   getInsights(
     platformCampaignId: string,
     accessToken: string,
+    accountId?: string,
   ): Promise<UnifiedMetrics>;
 
   /**
