@@ -28,6 +28,8 @@
     "@nestjs/platform-express": "^10.4.15",
     "@nestjs/swagger": "^7.4.2",
     "@prisma/client": "^5.22.0",
+    "@typesafe-ai/jev": "npm:@typesafe-ai/sdk@^0.6.0",
+    "@typesafe-ai/sdk": "^0.6.0",
     "amqp-connection-manager": "^4.1.14",
     "amqplib": "^0.10.5",
     "bcryptjs": "^3.0.3",
