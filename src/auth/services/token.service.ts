@@ -9,7 +9,7 @@ import {
   ACCESS_TOKEN_EXPIRES_IN,
   DEFAULT_REFRESH_TOKEN_EXPIRES_IN,
   TWO_FACTOR_LOGIN_TOKEN_EXPIRES_IN,
-} from '../constant/auth-messages';
+} from '../constants/auth-messages';
 
 /**
  * Owns every JWT concern: payload building, signing, verification, refresh

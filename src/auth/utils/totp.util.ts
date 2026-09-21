@@ -1,6 +1,6 @@
 import { authenticator } from 'otplib';
 import { createHash, randomBytes } from 'crypto';
-import { TOTP_ISSUER } from '../constant/auth-messages';
+import { TOTP_ISSUER } from '../constants/auth-messages';
 
 /**
  * Allow a small TOTP window (±1 period) so valid codes still pass when the

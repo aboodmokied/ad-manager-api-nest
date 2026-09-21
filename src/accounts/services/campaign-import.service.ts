@@ -88,26 +88,30 @@ export class CampaignImportService {
           continue;
         }
 
-        const uacmCampaign = await this.prisma.uacmCampaign.create({
-          data: {
-            userId: input.userId,
-            name: campaign.name,
-            status,
-            budget,
-            startDate,
-            endDate,
-          },
+        await this.prisma.$transaction(async (tx) => {
+          const uacmCampaign = await tx.uacmCampaign.create({
+            data: {
+              userId: input.userId,
+              tenantId: input.tenantId,
+              name: campaign.name,
+              status,
+              budget,
+              startDate,
+              endDate,
+            },
+          });
+
+          await tx.platformCampaign.create({
+            data: {
+              uacmCampaignId: uacmCampaign.id,
+              platform: input.platform,
+              platformCampaignId: externalId,
+              platformData,
+              status,
+            },
+          });
         });
 
-        await this.prisma.platformCampaign.create({
-          data: {
-            uacmCampaignId: uacmCampaign.id,
-            platform: input.platform,
-            platformCampaignId: externalId,
-            platformData,
-            status,
-          },
-        });
         result.imported++;
       } catch (error: any) {
         result.failed++;

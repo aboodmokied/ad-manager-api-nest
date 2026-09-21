@@ -1,31 +1,28 @@
 import { Module } from '@nestjs/common';
-import { CampaignsService } from './campaigns.service';
 import { CampaignsController } from './campaigns.controller';
-import { CampaignsWorker } from './campaigns.worker';
+import { CampaignEventsService } from './events/campaign-events.service';
 import { PrismaModule } from '../prisma/prisma.module';
 import { AuthModule } from '../auth/auth.module';
-import { RateLimiterService } from '../common/rate-limiter.service';
-import { IdempotencyService } from '../common/idempotency.service';
-import { AdapterFactory } from '../adapters/adapter-factory.service';
-import { MetaAdapter } from '../adapters/meta.adapter';
-import { GoogleAdapter } from '../adapters/google.adapter';
 import { AccountsModule } from '../accounts/accounts.module';
-import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
-import { TokenRevocationService } from '../auth/services/token-revocation.service';
+import { AdaptersModule } from '../adapters/adapters.module';
+import { RabbitMQModule } from '../rabbitmq/rabbitmq.module';
+import { CampaignsService } from './services/campaigns.service';
+import { CampaignsWorker } from './workers/campaigns.worker';
 
 @Module({
-  imports: [PrismaModule, AccountsModule, AuthModule],
+  imports: [
+    PrismaModule,
+    AccountsModule,
+    AuthModule,
+    AdaptersModule,
+    RabbitMQModule,
+  ],
   controllers: [CampaignsController],
   providers: [
     CampaignsService,
     CampaignsWorker,
-    RateLimiterService,
-    IdempotencyService,
-    AdapterFactory,
-    MetaAdapter,
-    GoogleAdapter,
-    JwtAuthGuard,
-    TokenRevocationService,
+    CampaignEventsService,
   ],
+  exports: [CampaignsService, CampaignEventsService],
 })
 export class CampaignsModule {}

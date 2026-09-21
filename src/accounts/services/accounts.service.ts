@@ -31,7 +31,7 @@ import { OAuthExchangeError } from './oauth-exchange.service';
 import { ConnectorFactory } from '../connectors/connector-factory';
 import { TokenEncryptionService } from './token-encryption.service';
 import { TokenVaultService } from './token-vault.service';
-import { TenantResolverService } from './tenant-resolver.service';
+import { TenantResolverService } from '../../common/services/tenant-resolver.service';
 import { CampaignImportRunner } from './campaign-import.runner';
 import { ConnectAdAccountDto } from '../dto/connect-ad-account.dto';
 import { ReconnectAdAccountDto } from '../dto/reconnect-ad-account.dto';

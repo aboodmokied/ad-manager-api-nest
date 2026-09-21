@@ -34,6 +34,11 @@ export class MetaConnector implements AdAccountConnector {
 
   constructor(private readonly oauthExchange: OAuthExchangeService) {}
 
+  /** Builds the Authorization header for Meta Graph API requests. */
+  private buildHeaders(accessToken: string): Record<string, string> {
+    return { Authorization: `Bearer ${accessToken}` };
+  }
+
   buildAuthUrl(state: string, config: PlatformOAuthConfig): string {
     const params = new URLSearchParams({
       client_id: config.clientId,
@@ -82,14 +87,14 @@ export class MetaConnector implements AdAccountConnector {
     config: PlatformOAuthConfig,
   ): Promise<PlatformAccount[]> {
     const accounts: PlatformAccount[] = [];
+    const headers = this.buildHeaders(accessToken);
     let nextUrl: string | null =
       `${config.apiBaseUrl}/me/adaccounts?${new URLSearchParams({
         fields: 'id,name',
         limit: '100',
-        access_token: accessToken,
       })}`;
     for (let page = 0; page < MAX_PAGINATION_PAGES && nextUrl; page++) {
-      const data = await this.oauthExchange.getJson(nextUrl);
+      const data = await this.oauthExchange.getJson(nextUrl, headers);
       const rawAccounts = Array.isArray(data?.data) ? data.data : [];
       accounts.push(
         ...rawAccounts.map((account: MetaAccountResponse) => ({
@@ -113,17 +118,17 @@ export class MetaConnector implements AdAccountConnector {
       adAccountId,
       config,
     );
+    const headers = this.buildHeaders(accessToken);
     const campaigns: ImportedCampaign[] = [];
     let nextUrl: string | null =
       `${config.apiBaseUrl}/act_${this.normalizeAccountId(adAccountId)}/campaigns?${new URLSearchParams(
         {
           fields: 'id,name,status,start_time,stop_time,daily_budget',
           limit: '500',
-          access_token: accessToken,
         },
       )}`;
     for (let page = 0; page < MAX_PAGINATION_PAGES && nextUrl; page++) {
-      const data = await this.oauthExchange.getJson(nextUrl);
+      const data = await this.oauthExchange.getJson(nextUrl, headers);
       const rawCampaigns = Array.isArray(data?.data) ? data.data : [];
       campaigns.push(
         ...rawCampaigns.map((campaign: MetaCampaignResponse) =>
@@ -143,7 +148,8 @@ export class MetaConnector implements AdAccountConnector {
   ): Promise<string | undefined> {
     try {
       const data: MetaAccountResponse = await this.oauthExchange.getJson(
-        `${config.apiBaseUrl}/act_${this.normalizeAccountId(adAccountId)}?fields=currency&access_token=${accessToken}`,
+        `${config.apiBaseUrl}/act_${this.normalizeAccountId(adAccountId)}?fields=currency`,
+        this.buildHeaders(accessToken),
       );
       return typeof data?.currency === 'string' ? data.currency : undefined;
     } catch {

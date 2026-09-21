@@ -10,11 +10,13 @@ import { AuthController } from './auth.controller';
 import { TokenRevocationService } from './services/token-revocation.service';
 import { PrismaModule } from '../prisma/prisma.module';
 import { MailModule } from '../mail/mail.module';
-import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
-import { ThrottleGuard } from 'src/common/guards/throttle.guard';
+import { CommonModule } from '../common/common.module';
+import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { ThrottleGuard } from '../common/guards/throttle.guard';
 
 @Module({
   imports: [
+    CommonModule,
     PrismaModule,
     MailModule,
     JwtModule.registerAsync({
@@ -42,6 +44,13 @@ import { ThrottleGuard } from 'src/common/guards/throttle.guard';
     JwtAuthGuard,
     ThrottleGuard,
   ],
-  exports: [JwtModule],
+  exports: [
+    JwtModule,
+    TokenRevocationService,
+    JwtAuthGuard,
+    ThrottleGuard,
+    AuthService,
+    TokenService,
+  ],
 })
 export class AuthModule {}

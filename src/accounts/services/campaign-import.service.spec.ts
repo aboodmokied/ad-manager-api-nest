@@ -8,6 +8,7 @@ import {
 
 describe('CampaignImportService', () => {
   let service: CampaignImportService;
+  let prismaMock: any;
   const platformCampaignFindFirst = jest.fn();
   const platformCampaignUpdate = jest.fn();
   const platformCampaignCreate = jest.fn();
@@ -56,8 +57,10 @@ describe('CampaignImportService', () => {
         create: platformCampaignCreate,
       },
       uacmCampaign: { create: uacmCampaignCreate },
+      $transaction: jest.fn().mockImplementation(async (cb) => cb(prisma)),
     };
 
+    prismaMock = prisma;
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         CampaignImportService,
@@ -158,5 +161,53 @@ describe('CampaignImportService', () => {
     expect(
       args.data.endDate.getTime() - args.data.startDate.getTime(),
     ).toBeGreaterThan(0);
+  });
+
+  it('rolls back uacmCampaign creation if platformCampaign creation fails (atomic transaction)', async () => {
+    let uacmPersisted = false;
+    const mockTx = {
+      uacmCampaign: {
+        create: jest.fn().mockImplementation(async ({ data }) => {
+          uacmPersisted = true;
+          return { id: 'uacm-temp-id', ...data };
+        }),
+      },
+      platformCampaign: {
+        create: jest.fn().mockRejectedValue(new Error('Foreign key violation or DB write error')),
+      },
+    };
+
+    // Simulate transaction manager rolling back state on failure
+    prismaMock.$transaction.mockImplementation(async (cb: (tx: any) => Promise<any>) => {
+      try {
+        return await cb(mockTx);
+      } catch (err) {
+        uacmPersisted = false; // Transaction rolled back on error
+        throw err;
+      }
+    });
+
+    const failingInput: CampaignImportInput = {
+      userId: 'user-1',
+      platform: Platform.META,
+      tenantId: 'tenant-1',
+      platformAccountId: 'act_111',
+      campaigns: [
+        {
+          externalId: 'c-failing',
+          name: 'Atomic Failure Test',
+          externalStatus: 'ACTIVE',
+          raw: {},
+        },
+      ],
+    };
+
+    const res = await service.importCampaigns(failingInput);
+
+    expect(res.failed).toBe(1);
+    expect(res.imported).toBe(0);
+    expect(mockTx.uacmCampaign.create).toHaveBeenCalled();
+    expect(mockTx.platformCampaign.create).toHaveBeenCalled();
+    expect(uacmPersisted).toBe(false); // Verified that no uacmCampaign remained
   });
 });

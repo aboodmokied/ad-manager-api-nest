@@ -22,8 +22,8 @@ import {
   EMAIL_VERIFICATION_TOKEN_EXPIRES_IN,
   EMAIL_VERIFICATION_TOKEN_TTL_SECONDS,
   DUMMY_PASSWORD_HASH,
-} from '../constant/auth-messages';
-import { resetPasswordPage, verificationResultPage } from '../utils/pages';
+} from '../constants/auth-messages';
+import { resetPasswordPage, verificationResultPage } from '../templates/auth-pages.template';
 
 /**
  * Core authentication facade. Owns the account lifecycle (registration, email

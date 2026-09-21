@@ -5,8 +5,8 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import { TokenPayload } from 'src/auth/interfaces/auth.interfaces';
-import { TokenRevocationService } from 'src/auth/services/token-revocation.service';
+import { TokenPayload } from '../../auth/interfaces/auth.interfaces';
+import { TokenRevocationService } from '../../auth/services/token-revocation.service';
 
 /**
  * Guards protected endpoints: requires a valid, non-revoked access JWT.

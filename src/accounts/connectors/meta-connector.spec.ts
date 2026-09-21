@@ -130,6 +130,7 @@ describe('MetaConnector', () => {
       ]);
       expect(exchange.getJson).toHaveBeenCalledWith(
         expect.stringContaining('/me/adaccounts?'),
+        { Authorization: 'Bearer tok' },
       );
     });
   });
@@ -163,9 +164,7 @@ describe('MetaConnector', () => {
       expect(campaigns[1].budget).toBeUndefined();
       expect(exchange.getJson).toHaveBeenCalledWith(
         expect.stringContaining('/act_111/campaigns?'),
-      );
-      expect(exchange.getJson).toHaveBeenCalledWith(
-        expect.stringContaining('access_token=tok'),
+        { Authorization: 'Bearer tok' },
       );
     });
 
@@ -186,6 +185,7 @@ describe('MetaConnector', () => {
       expect(campaigns[0].budget).toBe(10000); // yen has no cents
       expect(exchange.getJson).toHaveBeenCalledWith(
         expect.stringContaining('/act_111?fields=currency'),
+        { Authorization: 'Bearer tok' },
       );
     });
 
@@ -226,6 +226,7 @@ describe('MetaConnector', () => {
       expect(campaigns.map((c) => c.externalId)).toEqual(['c1', 'c2']);
       expect(exchange.getJson).toHaveBeenLastCalledWith(
         'https://graph.facebook.com/v21.0/act_111/campaigns?after=cursor',
+        { Authorization: 'Bearer tok' },
       );
     });
 

@@ -37,12 +37,15 @@ class MockConsumeMessage {
  */
 class MockRabbitMQ {
   /**
-   * In-memory store of queue names and their respective handler functions
+   * In-memory store of queue names and their respective bindings (routing key + handler)
    */
-  private queues: Map<string, (msg: any) => Promise<void>> = new Map();
+  private queues = new Map<
+    string,
+    { routingKey: string; handler: (msg: any) => Promise<void> }
+  >();
 
   /**
-   * Publishes a message to all queues bound to the given routing key (in mock mode)
+   * Publishes a message only to queues bound to the given routing key
    * @param routingKey The topic/routing key to publish to
    * @param message The message to send (will be JSON-stringified)
    */
@@ -51,10 +54,9 @@ class MockRabbitMQ {
       `[Mock RabbitMQ] Publishing message to routing key: ${routingKey}`,
       message,
     );
-    // In mock mode, we bypass the actual broker and immediately call all registered handlers
-    for (const [, handler] of this.queues) {
-      // Wrap our message in a MockConsumeMessage to mimic real AMQP message structure
-      await handler(
+    for (const [, binding] of this.queues) {
+      if (binding.routingKey !== routingKey) continue;
+      await binding.handler(
         new MockConsumeMessage(Buffer.from(JSON.stringify(message))),
       );
     }
@@ -74,8 +76,7 @@ class MockRabbitMQ {
     console.log(
       `[Mock RabbitMQ] Consuming from queue: ${queueName}, routing key: ${routingKey}`,
     );
-    // Store the handler in memory so publish() can call it later
-    this.queues.set(queueName, handler);
+    this.queues.set(queueName, { routingKey, handler });
   }
 
   /**
@@ -279,15 +280,20 @@ export class RabbitMQService implements OnModuleInit, OnModuleDestroy {
               channel.ack(msg);
             } catch (error) {
               const attempts = this.deliveryAttempts(msg);
-              if (attempts >= maxRetries) {
-                // Retry budget exhausted: route to DLQ (if configured) and
-                // nack without requeue so the message is not redelivered
-                // forever (poison message handling).
+              const isTerminal = this.isTerminalError(error);
+
+              if (attempts >= maxRetries || isTerminal) {
+                // Retry budget exhausted or non-retryable error: route to DLQ (if configured) and
+                // nack without requeue so the message is not redelivered forever (poison message handling).
+                const reason = isTerminal
+                  ? 'non-retryable terminal error'
+                  : `retry budget exhausted (${attempts}/${maxRetries} attempts)`;
+
                 this.logger.error(
-                  `Message on queue "${queueName}" failed after ${attempts} ` +
-                    `attempts; routing to DLQ: ${options.dlq ?? '(none, dropping)'}`,
+                  `Message on queue "${queueName}" failed (${reason}); routing to DLQ: ${options.dlq ?? '(none, dropping)'}`,
                   error instanceof Error ? error.stack : String(error),
                 );
+
                 if (options.dlq) {
                   channel.publish(this.exchangeName, options.dlq, msg.content, {
                     persistent: true,
@@ -295,18 +301,28 @@ export class RabbitMQService implements OnModuleInit, OnModuleDestroy {
                       'x-original-routing-key': routingKey,
                       'x-original-error':
                         error instanceof Error ? error.message : String(error),
+                      'x-retry-count': attempts,
                     },
                   });
                 }
                 channel.nack(msg, false, false);
               } else {
-                // Transient failure: requeue for a later attempt
+                // Transient failure: republish with incremented retry count and ack original message
+                const nextAttempt = attempts + 1;
                 this.logger.warn(
                   `Message on queue "${queueName}" failed ` +
-                    `(attempt ${attempts}/${maxRetries}); requeueing: ` +
+                    `(attempt ${attempts}/${maxRetries}); retrying (${nextAttempt}/${maxRetries}): ` +
                     `${error instanceof Error ? error.message : String(error)}`,
                 );
-                channel.nack(msg, false, true);
+
+                channel.publish(this.exchangeName, routingKey, msg.content, {
+                  persistent: true,
+                  headers: {
+                    ...(msg.properties.headers ?? {}),
+                    'x-retry-count': nextAttempt,
+                  },
+                });
+                channel.ack(msg);
               }
             }
           }
@@ -316,11 +332,15 @@ export class RabbitMQService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * Computes how many times a message has been delivered, based on the
-   * broker-managed x-death header that is attached on every requeue.
-   * First delivery (no header yet) counts as attempt 1.
+   * Computes how many times a message has been delivered, checking our
+   * custom x-retry-count header first, followed by broker-managed x-death.
+   * First delivery counts as attempt 1.
    */
   private deliveryAttempts(msg: ConsumeMessage): number {
+    const customCount = msg.properties.headers?.['x-retry-count'];
+    if (typeof customCount === 'number') {
+      return customCount;
+    }
     const death = msg.properties.headers?.['x-death'];
     if (Array.isArray(death) && death.length > 0) {
       const count = (death[0] as { count?: unknown } | null)?.count;
@@ -329,5 +349,23 @@ export class RabbitMQService implements OnModuleInit, OnModuleDestroy {
       }
     }
     return 1;
+  }
+
+  /**
+   * Determines whether an error is a non-retryable business logic error
+   * (e.g. missing connected account or missing entity) where retrying
+   * immediately without user intervention will never succeed.
+   */
+  private isTerminalError(error: unknown): boolean {
+    if (error instanceof Error) {
+      const msg = error.message.toLowerCase();
+      return (
+        msg.includes('no connected account') ||
+        msg.includes('not found') ||
+        msg.includes('invalid argument') ||
+        msg.includes('cannot be')
+      );
+    }
+    return false;
   }
 }

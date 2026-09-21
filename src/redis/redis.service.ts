@@ -111,6 +111,24 @@ class MockRedis implements RedisClient {
     return 1;
   }
 
+  async eval(script: string, numkeys: number, ...args: any[]): Promise<any> {
+    const key = String(args[0]);
+    const windowStart = Number(args[1]);
+    const now = Number(args[2]);
+    const member = String(args[3]);
+    const limit = Number(args[4]);
+    const intervalMs = Number(args[5]);
+
+    await this.zremrangebyscore(key, 0, windowStart);
+    const count = await this.zcard(key);
+    if (count >= limit) {
+      return 0;
+    }
+    await this.zadd(key, now, member);
+    await this.pexpire(key, intervalMs);
+    return 1;
+  }
+
   async quit(): Promise<void> {
     this.data.clear();
     this.expirations.clear();

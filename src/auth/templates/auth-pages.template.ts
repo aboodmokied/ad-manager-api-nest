@@ -81,8 +81,13 @@ export function resetPasswordPage(): string {
   var hint = document.getElementById('hint');
   var formWrap = document.getElementById('formWrap');
 
+  function showError(msg) {
+    error.textContent = msg;
+    error.style.display = 'block';
+  }
+
   if (!token) {
-    error.textContent = 'Invalid or missing reset link. Please request a new one.';
+    showError('Invalid or missing reset link. Please request a new one.');
     formWrap.style.display = 'none';
     hint.style.display = 'block';
     return;
@@ -97,15 +102,15 @@ export function resetPasswordPage(): string {
     var confirm = document.getElementById('confirm').value;
 
     if (password.length < 8) {
-      error.textContent = 'Password must be at least 8 characters long.';
+      showError('Password must be at least 8 characters long.');
       return;
     }
     if (!/[A-Za-z]/.test(password) || !/[0-9]/.test(password)) {
-      error.textContent = 'Password must contain at least one letter and one number.';
+      showError('Password must contain at least one letter and one number.');
       return;
     }
     if (password !== confirm) {
-      error.textContent = 'Passwords do not match.';
+      showError('Passwords do not match.');
       return;
     }
 
@@ -121,7 +126,7 @@ export function resetPasswordPage(): string {
       });
       var data = await res.json().catch(function () { return {}; });
       if (!res.ok) {
-        error.textContent = data.message || 'Failed to reset the password. Please try again.';
+        showError(data.message || 'Failed to reset the password. Please try again.');
         btn.disabled = false;
         btn.textContent = 'Reset password';
         return;
@@ -130,7 +135,7 @@ export function resetPasswordPage(): string {
       success.textContent = data.message || 'Password has been reset successfully. You can now log in.';
       success.style.display = 'block';
     } catch (err) {
-      error.textContent = 'Network error. Please check your connection and try again.';
+      showError('Network error. Please check your connection and try again.');
       btn.disabled = false;
       btn.textContent = 'Reset password';
     }

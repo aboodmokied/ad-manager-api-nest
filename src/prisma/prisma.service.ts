@@ -10,6 +10,7 @@ class MockPrisma {
   private connectedAccounts: any[] = [];
   private idempotencyRecords: any[] = [];
   private refreshTokens: any[] = [];
+  private metricLogs: any[] = [];
 
   user = {
     findUnique: async (args: any) => {
@@ -138,12 +139,118 @@ class MockPrisma {
       }
       return campaign;
     },
+    findFirst: async (args: any) => {
+      const campaign =
+        this.uacmCampaigns.find(
+          (c) =>
+            (args.where.id === undefined || c.id === args.where.id) &&
+            (args.where.userId === undefined || c.userId === args.where.userId),
+        ) || null;
+      if (campaign && args.include?.platformCampaigns) {
+        return {
+          ...campaign,
+          platformCampaigns: this.platformCampaigns.filter(
+            (pc) => pc.uacmCampaignId === campaign.id,
+          ),
+        };
+      }
+      return campaign;
+    },
+    findMany: async (args: any = {}) => {
+      let rows = this.uacmCampaigns.filter(
+        (c) =>
+          (args.where?.userId === undefined ||
+            c.userId === args.where.userId) &&
+          (args.where?.status === undefined || c.status === args.where.status),
+      );
+      const [field, direction] = Object.entries(args.orderBy ?? {
+        createdAt: 'desc',
+      })[0] as [string, string];
+      rows = [...rows].sort((a, b) =>
+        direction === 'asc'
+          ? a[field] > b[field]
+            ? 1
+            : -1
+          : a[field] < b[field]
+            ? 1
+            : -1,
+      );
+      const skip = args.skip ?? 0;
+      rows = rows.slice(skip, args.take === undefined ? undefined : skip + args.take);
+      if (args.include?.platformCampaigns) {
+        return rows.map((c) => ({
+          ...c,
+          platformCampaigns: this.platformCampaigns.filter(
+            (pc) => pc.uacmCampaignId === c.id,
+          ),
+        }));
+      }
+      return rows;
+    },
+    count: async (args: any = {}) =>
+      this.uacmCampaigns.filter(
+        (c) =>
+          (args.where?.userId === undefined ||
+            c.userId === args.where.userId) &&
+          (args.where?.status === undefined || c.status === args.where.status),
+      ).length,
+    delete: async (args: any) => {
+      const idx = this.uacmCampaigns.findIndex((c) => c.id === args.where.id);
+      if (idx === -1) {
+        throw new Error('Campaign not found');
+      }
+      const [removed] = this.uacmCampaigns.splice(idx, 1);
+      this.platformCampaigns = this.platformCampaigns.filter(
+        (pc) => pc.uacmCampaignId !== removed.id,
+      );
+      return removed;
+    },
+    update: async (args: any) => {
+      const idx = this.uacmCampaigns.findIndex((c) => c.id === args.where.id);
+      if (idx !== -1) {
+        this.uacmCampaigns[idx] = {
+          ...this.uacmCampaigns[idx],
+          ...args.data,
+          updatedAt: new Date(),
+        };
+        const campaign = this.uacmCampaigns[idx];
+        if (args.include?.platformCampaigns) {
+          const platformCampaigns = this.platformCampaigns.filter(
+            (pc) => pc.uacmCampaignId === campaign.id,
+          );
+          return { ...campaign, platformCampaigns };
+        }
+        return campaign;
+      }
+      throw new Error('Campaign not found');
+    },
     findUnique: async (args: any) => {
-      return this.uacmCampaigns.find((c) => c.id === args.where.id) || null;
+      const campaign =
+        this.uacmCampaigns.find((c) => c.id === args.where.id) || null;
+      if (campaign && args.include?.platformCampaigns) {
+        const platformCampaigns = this.platformCampaigns.filter(
+          (pc) => pc.uacmCampaignId === campaign.id,
+        );
+        return { ...campaign, platformCampaigns };
+      }
+      return campaign;
     },
   };
 
   platformCampaign = {
+    findMany: async (args?: any) => {
+      let list = [...this.platformCampaigns];
+      if (args?.where?.status) {
+        list = list.filter((pc) => pc.status === args.where.status);
+      }
+      if (args?.where?.uacmCampaignId) {
+        list = list.filter((pc) => pc.uacmCampaignId === args.where.uacmCampaignId);
+      }
+      if (args?.take) {
+        list = list.slice(0, args.take);
+      }
+      return list;
+    },
     findUnique: async (args: any) => {
       const pc =
         this.platformCampaigns.find((c) => c.id === args.where.id) || null;
@@ -192,10 +299,56 @@ class MockPrisma {
       this.idempotencyRecords.push(record);
       return record;
     },
+    deleteMany: async (args: any = {}) => {
+      const initialCount = this.idempotencyRecords.length;
+      this.idempotencyRecords = this.idempotencyRecords.filter((r) => {
+        if (args.where?.id !== undefined && r.id === args.where.id) {
+          return false;
+        }
+        if (
+          args.where?.processedAt?.lt !== undefined &&
+          r.processedAt < args.where.processedAt.lt
+        ) {
+          return false;
+        }
+        return true;
+      });
+      return { count: initialCount - this.idempotencyRecords.length };
+    },
   };
 
-  async $connect() {}
-  async $disconnect() {}
+  metricLog = {
+    findMany: async (args: any) => {
+      if (args?.where?.uacmCampaignId) {
+        return this.metricLogs.filter(
+          (m) => m.uacmCampaignId === args.where.uacmCampaignId,
+        );
+      }
+      return this.metricLogs;
+    },
+    create: async (args: any) => {
+      const record = {
+        id: `metric-${Date.now()}-${Math.random()}`,
+        ...args.data,
+        createdAt: new Date(),
+      };
+      this.metricLogs.push(record);
+      return record;
+    },
+  };
+
+  async $connect() { }
+  async $disconnect() { }
+
+  async $transaction<T>(
+    fn: ((tx: any) => Promise<T>) | any[],
+    _options?: any,
+  ): Promise<T> {
+    if (typeof fn === 'function') {
+      return fn(this);
+    }
+    return Promise.all(fn) as any;
+  }
 }
 
 @Injectable()
@@ -203,7 +356,7 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
   private client: PrismaClient | MockPrisma;
   private useMock = false;
 
-  constructor(private readonly configService: ConfigService) {}
+  constructor(private readonly configService: ConfigService) { }
 
   async onModuleInit() {
     // Use the real database whenever a DATABASE_URL is configured.
@@ -230,6 +383,16 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  async $transaction<T>(
+    fn: ((tx: any) => Promise<T>) | any[],
+    options?: any,
+  ): Promise<T> {
+    if (this.useMock) {
+      return (this.client as MockPrisma).$transaction(fn as any);
+    }
+    return (this.client as any).$transaction(fn, options);
+  }
+
   get uacmCampaign() {
     return (this.client as any).uacmCampaign;
   }
@@ -252,5 +415,9 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
 
   get idempotencyRecord() {
     return (this.client as any).idempotencyRecord;
+  }
+
+  get metricLog() {
+    return (this.client as any).metricLog;
   }
 }

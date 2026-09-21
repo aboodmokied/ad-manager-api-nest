@@ -21,6 +21,7 @@ export interface RedisClient {
   zcard(key: string): Promise<number>;
   zadd(key: string, ...args: any[]): Promise<number>;
   pexpire(key: string, milliseconds: number): Promise<number>;
+  eval?(script: string, numkeys: number, ...args: any[]): Promise<any>;
 }
 
 /**

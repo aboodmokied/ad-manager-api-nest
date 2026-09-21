@@ -12,7 +12,7 @@ import {
 } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { Platform } from '@prisma/client';
-import { IsAfter } from '../../common/validators/is-after.decorator';
+import { IsAfter } from '../../common/decorators/is-after.decorator';
 
 /** Maximum budget allowed by the Prisma Decimal(10,2) column. */
 const MAX_BUDGET = 99_999_999.99;
