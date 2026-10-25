@@ -1,0 +1,420 @@
+// Prisma schema for UACM (Unified Multi-Platform Ad Manager)
+// Architecture: Modular Monolith inside Turborepo
+// Preserves existing User/Auth/Campaign data while adding Multi-Tenancy, 3-Tier Campaigns, Outbox, and Saga Checkpoints
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// -------------------------------------------------------------
+// ENUMS
+// -------------------------------------------------------------
+
+enum Platform {
+  META
+  GOOGLE
+  LINKEDIN
+  X
+  SNAPCHAT
+  TIKTOK
+}
+
+enum ConnectedAccountStatus {
+  CONNECTED
+  DISCONNECTED
+  TOKEN_EXPIRED
+  REAUTHORIZATION_REQUIRED
+}
+
+enum CampaignStatus {
+  // Legacy states
+  PENDING
+  ACTIVE
+  PAUSED
+  ERROR
+  // Canonical 3-tier lifecycle states
+  DRAFT
+  PRE_VALIDATING
+  PROCESSING_MEDIA
+  QUEUED_FOR_PUBLISH
+  PARTIALLY_LIVE
+  LIVE
+  FAILED
+}
+
+enum PlatformExecutionStatus {
+  PENDING
+  IN_PROGRESS
+  LIVE
+  FAILED
+}
+
+enum WorkspaceRole {
+  OWNER
+  ADMIN
+  MEDIA_BUYER
+  ANALYST
+  CLIENT_VIEWER
+}
+
+enum OutboxStatus {
+  PENDING
+  PROCESSING
+  PUBLISHED
+  FAILED
+}
+
+enum SagaStatus {
+  IN_PROGRESS
+  COMPLETED
+  PARTIAL_SUCCESS
+  FAILED
+}
+
+enum SagaFailurePolicy {
+  PARTIAL_LIVE
+  STRICT_ALL_OR_NOTHING
+}
+
+// -------------------------------------------------------------
+// AUTH & USERS (Preserved from existing schema)
+// -------------------------------------------------------------
+
+model User {
+  id                     String    @id @default(cuid())
+  name                   String
+  email                  String    @unique
+  passwordHash           String
+  twoFactorEnabled       Boolean   @default(false)
+  twoFactorSecret        String?
+  twoFactorRecoveryCodes String[]  @default([])
+  emailVerified          Boolean   @default(false)
+  oauthProvider          String?
+  oauthProviderId        String?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  // Relations
+  refreshTokens          RefreshToken[]
+  connectedAccounts      ConnectedAccount[]
+  campaigns              UacmCampaign[]
+  workspaceMembers       WorkspaceMember[]
+  auditLogs              AuditLog[]
+
+  @@unique([oauthProvider, oauthProviderId])
+}
+
+model RefreshToken {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// -------------------------------------------------------------
+// MULTI-TENANCY & WORKSPACES
+// -------------------------------------------------------------
+
+model Workspace {
+  id           String   @id @default(cuid())
+  name         String
+  slug         String   @unique
+  baseCurrency String   @default("USD") // ISO-4217
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Relations
+  members           WorkspaceMember[]
+  connectedAccounts ConnectedAccount[]
+  campaigns         UnifiedCampaign[]
+  auditLogs         AuditLog[]
+  sagaInstances     SagaInstance[]
+}
+
+model WorkspaceMember {
+  id          String        @id @default(cuid())
+  workspaceId String
+  userId      String
+  role        WorkspaceRole @default(MEDIA_BUYER)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, userId])
+  @@index([userId])
+}
+
+// -------------------------------------------------------------
+// CONNECTED AD ACCOUNTS (AES-256-GCM Encrypted)
+// -------------------------------------------------------------
+
+model ConnectedAccount {
+  id                String                 @id @default(cuid())
+  userId            String
+  workspaceId       String?
+  platform          Platform
+  status            ConnectedAccountStatus @default(CONNECTED)
+  accountName       String?
+  platformAccountId String?
+  accessToken       String                 // AES-256-GCM encrypted (v1:iv:tag:ciphertext)
+  refreshToken      String?                // AES-256-GCM encrypted
+  expiresAt         DateTime?
+  tokenExpiresAt    DateTime?
+  tenantId          String                 @default("default")
+  currency          String                 @default("USD")
+  timezone          String                 @default("UTC")
+  lastSyncedAt      DateTime?
+  createdAt         DateTime               @default(now())
+  updatedAt         DateTime               @updatedAt
+
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, platform])
+  @@index([userId])
+  @@index([workspaceId])
+  @@index([tenantId])
+}
+
+// -------------------------------------------------------------
+// PRESERVED SINGLE-TIER CAMPAIGN MODELS
+// -------------------------------------------------------------
+
+model UacmCampaign {
+  id                String             @id @default(cuid())
+  userId            String
+  name              String
+  status            CampaignStatus     @default(PENDING)
+  budget            Decimal            @db.Decimal(10, 2)
+  startDate         DateTime
+  endDate           DateTime
+  tenantId          String?
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+
+  user              User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  platformCampaigns PlatformCampaign[]
+  metricLogs        MetricLog[]
+
+  @@index([userId])
+  @@index([tenantId])
+}
+
+model PlatformCampaign {
+  id                 String         @id @default(cuid())
+  uacmCampaignId     String
+  platform           Platform
+  platformCampaignId String?
+  platformData       Json           @db.JsonB
+  status             CampaignStatus @default(PENDING)
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+
+  uacmCampaign UacmCampaign @relation(fields: [uacmCampaignId], references: [id], onDelete: Cascade)
+  metricLogs   MetricLog[]
+
+  @@unique([uacmCampaignId, platform])
+  @@index([platform, platformCampaignId])
+}
+
+model MetricLog {
+  id                 String           @id @default(cuid())
+  uacmCampaignId     String
+  platformCampaignId String
+  platform           Platform
+  date               DateTime
+  unifiedMetrics     Json             @db.JsonB
+  rawMetrics         Json             @db.JsonB
+  createdAt          DateTime         @default(now())
+
+  uacmCampaign     UacmCampaign     @relation(fields: [uacmCampaignId], references: [id], onDelete: Cascade)
+  platformCampaign PlatformCampaign @relation(fields: [platformCampaignId], references: [id], onDelete: Cascade)
+}
+
+// -------------------------------------------------------------
+// CANONICAL 3-TIER CAMPAIGN HIERARCHY (Strict BigInt Micros)
+// -------------------------------------------------------------
+
+model UnifiedCampaign {
+  id                String         @id @default(cuid())
+  workspaceId       String
+  name              String
+  objective         String         // UnifiedCampaignObjective
+  status            CampaignStatus @default(DRAFT)
+  totalBudgetMicros BigInt         // 1 USD = 1,000,000 Micros (Zero float)
+  dailyBudgetMicros BigInt?
+  currency          String         @default("USD") // ISO-4217
+  startDate         DateTime
+  endDate           DateTime
+  targetPlatforms   Platform[]
+  platformOverrides Json?          @db.JsonB
+  idempotencyKey    String         @unique
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  workspace        Workspace                 @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  targetingSets    UnifiedTargetingSet[]
+  executionRecords PlatformExecutionRecord[]
+  sagaInstances    SagaInstance[]
+
+  @@index([workspaceId, status])
+  @@index([idempotencyKey])
+}
+
+model UnifiedTargetingSet {
+  id                String         @id @default(cuid())
+  campaignId        String
+  workspaceId       String
+  name              String
+  status            CampaignStatus @default(DRAFT)
+  dailyBudgetMicros BigInt?
+  bidStrategy       String?
+  bidAmountMicros   BigInt?
+  targetingData     Json           @db.JsonB
+  platformOverrides Json?          @db.JsonB
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  campaign    UnifiedCampaign     @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  creativeAds UnifiedCreativeAd[]
+
+  @@index([campaignId])
+  @@index([workspaceId])
+}
+
+model UnifiedCreativeAd {
+  id                String         @id @default(cuid())
+  targetingSetId    String
+  workspaceId       String
+  name              String
+  status            CampaignStatus @default(DRAFT)
+  headline          String
+  body              String
+  mediaUrls         Json           @db.JsonB // UnifiedMediaAsset[]
+  callToAction      String
+  destinationUrl    String
+  finalUrlWithUtm   String
+  utmParameters     Json?          @db.JsonB
+  platformOverrides Json?          @db.JsonB
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  targetingSet UnifiedTargetingSet @relation(fields: [targetingSetId], references: [id], onDelete: Cascade)
+
+  @@index([targetingSetId])
+  @@index([workspaceId])
+}
+
+// -------------------------------------------------------------
+// PLATFORM EXECUTION & STEP CHECKPOINTS (Idempotency Recovery)
+// -------------------------------------------------------------
+
+model PlatformExecutionRecord {
+  id                 String                  @id @default(cuid())
+  campaignId         String
+  platform           Platform
+  status             PlatformExecutionStatus @default(PENDING)
+  externalMediaId    String?                 // Step 1 Checkpoint
+  externalCampaignId String?                 // Step 2 Checkpoint
+  externalAdSetId    String?                 // Step 3 Checkpoint
+  externalAdId       String?                 // Step 4 Checkpoint
+  lastError          Json?                   @db.JsonB // PlatformNormalizedExceptionDto
+  publishedAt        DateTime?
+  createdAt          DateTime                @default(now())
+  updatedAt          DateTime                @updatedAt
+
+  campaign UnifiedCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@unique([campaignId, platform])
+  @@index([platform, externalCampaignId])
+}
+
+// -------------------------------------------------------------
+// SAGA INSTANCE STATE
+// -------------------------------------------------------------
+
+model SagaInstance {
+  id              String            @id @default(cuid())
+  sagaId          String            @unique
+  campaignId      String
+  workspaceId     String
+  currentStep     String
+  targetPlatforms Platform[]
+  platformStatus  Json              @db.JsonB
+  stepCheckpoints Json              @db.JsonB
+  status          SagaStatus        @default(IN_PROGRESS)
+  failurePolicy   SagaFailurePolicy @default(PARTIAL_LIVE)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  campaign  UnifiedCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  workspace Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([campaignId])
+  @@index([workspaceId])
+}
+
+// -------------------------------------------------------------
+// TRANSACTIONAL OUTBOX
+// -------------------------------------------------------------
+
+model OutboxEvent {
+  id            String       @id @default(cuid())
+  aggregateType String       // e.g. "Campaign"
+  aggregateId   String       // e.g. campaignId
+  eventType     String       // e.g. "campaign.publish_initiated"
+  payload       Json         @db.JsonB
+  status        OutboxStatus @default(PENDING)
+  retryCount    Int          @default(0)
+  lastError     String?
+  createdAt     DateTime     @default(now())
+  processedAt   DateTime?
+
+  @@index([status, createdAt])
+  @@index([aggregateType, aggregateId])
+}
+
+// -------------------------------------------------------------
+// IDEMPOTENCY & AUDIT LOGS
+// -------------------------------------------------------------
+
+model IdempotencyRecord {
+  id              String    @id // Unique idempotency key (e.g., "campaign:123")
+  scope           String?   // e.g. "campaign:publish"
+  responsePayload Json?     @db.JsonB
+  processedAt     DateTime  @default(now())
+  expiresAt       DateTime?
+
+  @@index([processedAt])
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  workspaceId String
+  userId      String
+  action      String   // e.g. "CAMPAIGN_CREATE", "BUDGET_UPDATE"
+  entityType  String   // e.g. "UnifiedCampaign"
+  entityId    String
+  details     Json     @db.JsonB
+  ipAddress   String?
+  createdAt   DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, createdAt])
+  @@index([userId])
+}

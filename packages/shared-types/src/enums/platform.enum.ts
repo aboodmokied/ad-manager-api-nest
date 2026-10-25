@@ -1,0 +1,22 @@
+export enum Platform {
+  META = 'META',
+  GOOGLE = 'GOOGLE',
+  LINKEDIN = 'LINKEDIN',
+  X = 'X',
+  SNAPCHAT = 'SNAPCHAT',
+  TIKTOK = 'TIKTOK',
+}
+
+export enum ConnectedAccountStatus {
+  CONNECTED = 'CONNECTED',
+  DISCONNECTED = 'DISCONNECTED',
+  TOKEN_EXPIRED = 'TOKEN_EXPIRED',
+  REAUTHORIZATION_REQUIRED = 'REAUTHORIZATION_REQUIRED',
+}
+
+export enum PlatformExecutionStatus {
+  PENDING = 'PENDING',
+  IN_PROGRESS = 'IN_PROGRESS',
+  LIVE = 'LIVE',
+  FAILED = 'FAILED',
+}

@@ -1,0 +1,7 @@
+export enum WorkspaceRole {
+  OWNER = 'OWNER',
+  ADMIN = 'ADMIN',
+  MEDIA_BUYER = 'MEDIA_BUYER',
+  ANALYST = 'ANALYST',
+  CLIENT_VIEWER = 'CLIENT_VIEWER',
+}
